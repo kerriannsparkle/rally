@@ -1,7 +1,8 @@
 
-import { ChangeEvent, FormEvent, useMemo, useState } from 'react'
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react'
 import './styles.css'
 import { supabase } from './supabase'
+import Auth from './Auth'
 
 type SpaceType='personal'|'household'|'work'|'friends'
 type Role='Owner'|'Admin'|'Approver'|'Member'
@@ -104,6 +105,24 @@ const roleFor=(s:Space,userId:string)=>s.members.find(m=>m.memberId===userId)?.r
 const spaceMember=(s:Space,userId:string)=>s.members.find(m=>m.memberId===userId)
 
 export default function App(){
+ const [sessionChecked, setSessionChecked] = useState(false)
+const [authenticated, setAuthenticated] = useState(false)
+
+useEffect(() => {
+  supabase.auth.getSession().then(({ data }) => {
+    setAuthenticated(!!data.session)
+    setSessionChecked(true)
+  })
+
+  const {
+    data: { subscription }
+  } = supabase.auth.onAuthStateChange((_event, session) => {
+    setAuthenticated(!!session)
+    setSessionChecked(true)
+  })
+
+  return () => subscription.unsubscribe()
+}, [])
  console.log('Supabase connected:', supabase)
  const [data,setData]=useState<AppData>(load)
  const [spaceId,setSpaceId]=useState<string>('all')
@@ -178,7 +197,13 @@ export default function App(){
   update({...data,activities:data.activities.map((x):Activity=>x.id===a.id?{...x,status:'open' as ActivityStatus,completedBy:undefined,completedAt:undefined}:x),notifications:data.notifications.map(n=>n.activityId===a.id&&n.recipientId===user.id?{...n,read:true}:n)})
   note('Activity sent back.')
  }
+ if (!sessionChecked) {
+  return <div className="auth-loading">Loading Rally...</div>
+}
 
+if (!authenticated) {
+  return <Auth onAuthenticated={() => setAuthenticated(true)} />
+}
  return <div className="app">
   {toast&&<div className="toast">{toast}</div>}
   <header className="topbar">
