@@ -1,56 +1,24 @@
-# Rally MVP Foundation
+# Rally 8.0 — MVP Design System
 
-A clean React + TypeScript + Vite foundation for Rally.
+This is the visual redesign of the Phase 7.6 functional baseline.
 
-## Included
+What changed:
+- New cohesive Rally color system
+- Premium typography and spacing hierarchy
+- Redesigned top bar and bottom navigation
+- More polished Rally Space switcher
+- Refined All My Rally cards
+- Stronger Home score + leaderboard hierarchy
+- Cleaner activity states and forms
+- More game-like leaderboard presentation
+- Refined goals, treats, stats, community and notifications
+- Full Profile control center visually redesigned
+- Settings and admin controls visually unified
+- Better responsive/mobile layout
+- Consistent buttons, surfaces, shadows, radii, progress bars and empty states
 
-- Demo login and signup
-- Household dashboard
-- Multiple member point balances
-- Daily, weekly, monthly, seasonal, and one-time activities
-- Household-wide completion behavior
-- Multi-contributor activities
-- Rewards and point redemption
-- Affiliate reward links
-- Shared goals
-- History
-- Create center
-- Subscription page
-- Household admin controls
-- Local browser persistence
-- Vercel configuration
+Functionality was intentionally preserved from Phase 7.6.
 
-## Run locally
-
-```bash
+Use:
 npm install
 npm run dev
-```
-
-## Production build
-
-```bash
-npm run build
-```
-
-## Deploy to Vercel
-
-Upload the unzipped project contents to your GitHub repository. Vercel settings:
-
-- Framework: Vite
-- Build command: `npm run build`
-- Output directory: `dist`
-- Install command: `npm install`
-
-## Important
-
-This version runs fully as an interactive prototype and stores data in the browser.
-
-The next production phase is to connect:
-
-- Supabase authentication
-- Shared household database
-- Secure role permissions
-- Stripe billing
-- Photo storage
-- Amazon Associates tracking
