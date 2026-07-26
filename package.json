@@ -16,8 +16,9 @@
     "react-dom": "latest",
     "lucide-react": "latest"
   },
-"devDependencies": {
-  "@types/react": "latest",
-  "@types/react-dom": "latest",
-  "vite-plugin-pwa": "^1.0.3"
+  "devDependencies": {
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "vite-plugin-pwa": "^1.0.3"
+  }
 }
