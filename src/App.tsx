@@ -1,6 +1,7 @@
 
 import { ChangeEvent, FormEvent, useMemo, useState } from 'react'
 import './styles.css'
+import { supabase } from './supabase'
 
 type SpaceType='personal'|'household'|'work'|'friends'
 type Role='Owner'|'Admin'|'Approver'|'Member'
@@ -103,6 +104,7 @@ const roleFor=(s:Space,userId:string)=>s.members.find(m=>m.memberId===userId)?.r
 const spaceMember=(s:Space,userId:string)=>s.members.find(m=>m.memberId===userId)
 
 export default function App(){
+ console.log('Supabase connected:', supabase)
  const [data,setData]=useState<AppData>(load)
  const [spaceId,setSpaceId]=useState<string>('all')
  const [screen,setScreen]=useState<Screen>('home')
