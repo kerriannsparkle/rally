@@ -1,5 +1,5 @@
 
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react'
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react' import type { User } from '@supabase/supabase-js'
 import './styles.css'
 import { supabase } from './supabase'
 import Auth from './Auth'
@@ -106,18 +106,25 @@ const spaceMember=(s:Space,userId:string)=>s.members.find(m=>m.memberId===userId
 
 export default function App(){
  const [sessionChecked, setSessionChecked] = useState(false)
+ const [authUser, setAuthUser] = useState<User | null>(null)
 const [authenticated, setAuthenticated] = useState(false)
 
 useEffect(() => {
-  supabase.auth.getSession().then(({ data }) => {
-    setAuthenticated(!!data.session)
+  supabase.auth.getUser().then(({ data, error }) => {
+    if (error) {
+      console.error('Unable to load user:', error)
+    }
+
+    setAuthUser(data.user)
+    setAuthenticated(!!data.user)
     setSessionChecked(true)
   })
 
   const {
     data: { subscription }
   } = supabase.auth.onAuthStateChange((_event, session) => {
-    setAuthenticated(!!session)
+    setAuthUser(session?.user ?? null)
+    setAuthenticated(!!session?.user)
     setSessionChecked(true)
   })
 
@@ -215,10 +222,31 @@ if (!authenticated) {
     </select>
     <button className="plus" title="Create a Rally Space" aria-label="Create a Rally Space" onClick={()=>setInviteOpen(!inviteOpen)}>＋</button>
    </div>
-   <div className="top-actions">
-    <button className="bell" title="Notifications" aria-label="Notifications" onClick={()=>setScreen('notifications')}>🔔{unread>0&&<b>{unread}</b>}</button>
-    <button className="profile-shortcut" onClick={()=>setScreen('profile')}><Avatar member={user}/></button>
-   </div>
+<div className="top-actions">
+  <button
+    className="bell"
+    title="Notifications"
+    aria-label="Notifications"
+    onClick={() => setScreen('notifications')}
+  >
+    🔔{unread > 0 && <b>{unread}</b>}
+  </button>
+
+  <button
+    className="profile-shortcut"
+    onClick={() => setScreen('profile')}
+  >
+    <Avatar member={user}/>
+  </button>
+
+  <button
+    className="secondary"
+    onClick={logout}
+    title={`Logged in as ${authUser?.email ?? 'Rally user'}`}
+  >
+    Log out
+  </button>
+</div>
   </header>
 
   {inviteOpen&&<CreateSpace data={data} update={update} user={user} close={()=>setInviteOpen(false)}/>}
