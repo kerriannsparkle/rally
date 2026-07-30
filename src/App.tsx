@@ -1,5 +1,5 @@
-
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react' import type { User } from '@supabase/supabase-js'
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react'
+import type { User } from '@supabase/supabase-js'
 import './styles.css'
 import { supabase } from './supabase'
 import Auth from './Auth'
