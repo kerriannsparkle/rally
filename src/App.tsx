@@ -105,31 +105,31 @@ const roleFor=(s:Space,userId:string)=>s.members.find(m=>m.memberId===userId)?.r
 const spaceMember=(s:Space,userId:string)=>s.members.find(m=>m.memberId===userId)
 
 export default function App(){
- const [sessionChecked, setSessionChecked] = useState(false)
- const [authUser, setAuthUser] = useState<User | null>(null)
-const [authenticated, setAuthenticated] = useState(false)
+const [authenticated,setAuthenticated]=useState(false)
+const [sessionChecked,setSessionChecked]=useState(false)
+const [authUser,setAuthUser]=useState<User|null>(null)
 
-useEffect(() => {
-  supabase.auth.getUser().then(({ data, error }) => {
-    if (error) {
-      console.error('Unable to load user:', error)
-    }
+useEffect(()=>{
+ supabase.auth.getUser().then(({data,error})=>{
+  if(error){
+   console.error('Unable to load user:',error)
+  }
 
-    setAuthUser(data.user)
-    setAuthenticated(!!data.user)
-    setSessionChecked(true)
-  })
+  setAuthUser(data.user)
+  setAuthenticated(!!data.user)
+  setSessionChecked(true)
+ })
 
-  const {
-    data: { subscription }
-  } = supabase.auth.onAuthStateChange((_event, session) => {
-    setAuthUser(session?.user ?? null)
-    setAuthenticated(!!session?.user)
-    setSessionChecked(true)
-  })
+ const {
+  data:{subscription}
+ }=supabase.auth.onAuthStateChange((_event,session)=>{
+  setAuthUser(session?.user??null)
+  setAuthenticated(!!session?.user)
+  setSessionChecked(true)
+ })
 
-  return () => subscription.unsubscribe()
-}, [])
+ return ()=>subscription.unsubscribe()
+},[])
  console.log('Supabase connected:', supabase)
  const [data,setData]=useState<AppData>(load)
  const [spaceId,setSpaceId]=useState<string>('all')
@@ -143,6 +143,18 @@ useEffect(() => {
  const myRole=activeSpace?roleFor(activeSpace,user.id):undefined
  const update=(next:AppData)=>{setData(next);saveLocal(next)}
  const note=(msg:string)=>{setToast(msg);setTimeout(()=>setToast(''),1800)}
+ const logout = async () => {
+  const { error } = await supabase.auth.signOut()
+
+  if (error) {
+    console.error(error)
+    note('Unable to log out.')
+    return
+  }
+
+  setAuthenticated(false)
+  setAuthUser(null)
+}
  const visibleActivities=useMemo(()=>{
   const scoped=data.activities.filter(a=>spaceId==='all'?spaces.some(s=>s.id===a.spaceId):a.spaceId===spaceId)
   if(spaceId==='all') return scoped.filter(a=>{
