@@ -19,7 +19,7 @@ type Activity={
  id:string;spaceId:string;name:string;icon:string;category:string;points:number;recurrence:string;
  status:ActivityStatus;visibility:Visibility;visibleTo?:string[];assignedTo:string[];completionMode:CompletionMode;
  approval:boolean;approverIds:string[];proofMode:ProofMode;completedBy?:string;completedAt?:string;
- contributesToGoals:boolean;version:number;createdBy:string
+ contributesToGoals:boolean;pointDestination?:'personal'|'shared';version:number;createdBy:string
 }
 type Treat={id:string;spaceId:string;name:string;icon:string;description:string;points:number;assignedTo:string[];priorityFor:string[];status:'locked'|'obtained';obtainedBy?:string;obtainedAt?:string}
 type Goal={id:string;spaceId:string;name:string;icon:string;target:number;progress:number;status:'active'|'reached'|'celebrated';contributionMode:'space_only'|'selected';allowedSpaceIds:string[]}
@@ -151,7 +151,7 @@ useEffect(() => {
         name: space.name,
         icon: space.icon || '✨',
         type: space.type as SpaceType,
-        timezone: 'America/New_York',
+        timezone:space.timezone || 'America/New_York',
         members: [
           {
             memberId: current.currentUserId,
@@ -162,9 +162,9 @@ useEffect(() => {
             joinedAt: space.created_at || new Date().toISOString()
           }
         ],
-        weeklyLeaderboard: false,
-        poolEnabled: false,
-        poolBalance: 0
+       weeklyLeaderboard:space.weekly_leaderboard ?? true,
+poolEnabled:space.pool_enabled ?? false,
+poolBalance:space.pool_balance ?? 0
       }))
     }))
   }
@@ -375,12 +375,36 @@ function ActivityCard({a,data,user,complete,approve,sendBack}:{a:Activity;data:A
 function Activities({data,space,user,activities,complete,approve,sendBack,update,note}:{data:AppData;space:Space;user:Member;activities:Activity[];complete:(a:Activity)=>void;approve:(a:Activity)=>void;sendBack:(a:Activity)=>void;update:(d:AppData)=>void;note:(s:string)=>void}){
  const [name,setName]=useState('');const [category,setCategory]=useState('Home');const [requireApproval,setRequireApproval]=useState(false)
  const points=suggestedPoints(name,category)
- const add=(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);const assigned=Array.from(f.getAll('assigned')).map(String);const approvers=Array.from(f.getAll('approver')).map(String);const a:Activity={id:crypto.randomUUID(),spaceId:space.id,name:String(f.get('name')),icon:String(f.get('icon')||'✨'),category:String(f.get('category')),points:Number(f.get('points')),recurrence:String(f.get('recurrence')),status:'open',visibility:String(f.get('visibility')) as Visibility,assignedTo:assigned.length?assigned:space.members.map(m=>m.memberId),completionMode:String(f.get('completionMode')) as CompletionMode,approval:f.get('approval')==='on',approverIds:approvers,proofMode:String(f.get('proof')) as ProofMode,contributesToGoals:f.get('goals')==='on',version:1,createdBy:user.id};update({...data,activities:[a,...data.activities]});setName('');setRequireApproval(false);note('Activity added.')}
+ const add=(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);const assigned=Array.from(f.getAll('assigned')).map(String);const approvers=Array.from(f.getAll('approver')).map(String);const a:Activity={id:crypto.randomUUID(),spaceId:space.id,name:String(f.get('name')),icon:String(f.get('icon')||'✨'),category:String(f.get('category')),points:Number(f.get('points')),recurrence:String(f.get('recurrence')),status:'open',visibility:String(f.get('visibility')) as Visibility,assignedTo:assigned.length?assigned:space.members.map(m=>m.memberId),completionMode:String(f.get('completionMode')) as CompletionMode,approval:f.get('approval')==='on',approverIds:approvers,proofMode:String(f.get('proof')) as ProofMode,contributesToGoals:f.get('goals')==='on',
+pointDestination:String(f.get('pointDestination')||'personal') as 'personal'|'shared',
+version:1,
+createdBy:user.id};update({...data,activities:[a,...data.activities]});setName('');setRequireApproval(false);note('Activity added.')}
  const canManage=['Owner','Admin'].includes(roleFor(space,user.id)||'')
  return <>
   <section className="activity-hero"><div><p>✓ THIS PERIOD</p><h1>Activities</h1><span>Incomplete activities simply earn no points. No overdue penalties.</span></div><b>{activities.filter(a=>a.status==='complete').length}/{activities.filter(a=>a.status!=='paused'&&a.status!=='archived').length}</b></section>
   <section className="panel">{activities.filter(a=>a.status!=='archived'&&a.status!=='paused').map(a=><ActivityCard key={a.id} a={a} data={data} user={user} complete={complete} approve={approve} sendBack={sendBack}/>)}</section>
-  <form className="panel form" onSubmit={add}><div className="section-title"><div><p className="eyebrow">Create activity</p><h2>Add something new</h2></div></div><div className="two"><label>Name<input name="name" required value={name} onChange={e=>setName(e.target.value)}/></label><label>Icon<input name="icon" placeholder="✨"/></label></div><div className="three"><label>Category<input name="category" value={category} onChange={e=>setCategory(e.target.value)}/></label><label>Points<select name="points" defaultValue={String(points)} key={points}>{POINT_OPTIONS.map(p=><option value={p} key={p}>{p} points</option>)}</select><small>Suggested: {points}. Admin-controlled presets reduce point inflation.</small></label><label>Recurrence<select name="recurrence"><option>Every day</option><option>Every week</option><option>3x/week</option><option>Every other week</option><option>Twice/month</option><option>Every 90 days</option><option>One time</option></select></label></div><div className="three"><label>Completion<select name="completionMode"><option value="shared_once">One completion for the Rally</option><option value="per_member">Each member completes it</option></select></label><label>Visibility<select name="visibility"><option value="space">Visible to Rally</option><option value="private">Private to me</option></select></label><label>Photo proof<select name="proof"><option>None</option><option>Optional photo</option><option>Required photo</option></select></label></div><fieldset><legend>Assign to</legend>{space.members.map(m=><label className="check" key={m.memberId}><input type="checkbox" name="assigned" value={m.memberId}/>{memberName(data,m.memberId)}</label>)}</fieldset>{space.members.length>1&&<><label className="check approval-toggle"><input type="checkbox" name="approval" checked={requireApproval} onChange={e=>setRequireApproval(e.target.checked)}/> Require approval</label>{requireApproval&&<fieldset className="approver-picker"><legend>Who can approve?</legend><p className="field-help">Choose one or more people who can approve this activity.</p><div className="approver-options">{space.members.filter(m=>m.memberId!==user.id).map(m=><label className="person-option" key={m.memberId}><input type="checkbox" name="approver" value={m.memberId}/><Avatar member={data.members.find(x=>x.id===m.memberId)!}/><span>{memberName(data,m.memberId)}</span></label>)}</div></fieldset>}</>}<label className="check"><input type="checkbox" name="goals" defaultChecked/> Count toward this Rally's shared goals</label><button className="primary">Add activity</button></form>
+  <form className="panel form" onSubmit={add}><div className="section-title"><div><p className="eyebrow">Create activity</p><h2>Add something new</h2></div></div><div className="two"><label>Name<input name="name" required value={name} onChange={e=>setName(e.target.value)}/></label><label>Icon<input name="icon" placeholder="✨"/></label></div><div className="three"><label>Category<input name="category" value={category} onChange={e=>setCategory(e.target.value)}/></label><label>Points<select name="points" defaultValue={String(points)} key={points}>{POINT_OPTIONS.map(p=><option value={p} key={p}>{p} points</option>)}</select><small>Suggested: {points}. Admin-controlled presets reduce point inflation.</small></label><label>Recurrence<select name="recurrence"><option>Every day</option><option>Every week</option><option>3x/week</option><option>Every other week</option><option>Twice/month</option><option>Every 90 days</option><option>One time</option></select></label></div><fieldset>
+ <legend>Point destination</legend>
+
+ <label className="check">
+  <input
+   type="radio"
+   name="pointDestination"
+   value="personal"
+   defaultChecked
+  />
+  Personal only
+ </label>
+
+ <label className="check">
+  <input
+   type="radio"
+   name="pointDestination"
+   value="shared"
+  />
+  Shared only
+ </label>
+</fieldset><div className="three"><label>Completion<select name="completionMode"><option value="shared_once">One completion for the Rally</option><option value="per_member">Each member completes it</option></select></label><label>Visibility<select name="visibility"><option value="space">Visible to Rally</option><option value="private">Private to me</option></select></label><label>Photo proof<select name="proof"><option>None</option><option>Optional photo</option><option>Required photo</option></select></label></div><fieldset><legend>Assign to</legend>{space.members.map(m=><label className="check" key={m.memberId}><input type="checkbox" name="assigned" value={m.memberId}/>{memberName(data,m.memberId)}</label>)}</fieldset>{space.members.length>1&&<><label className="check approval-toggle"><input type="checkbox" name="approval" checked={requireApproval} onChange={e=>setRequireApproval(e.target.checked)}/> Require approval</label>{requireApproval&&<fieldset className="approver-picker"><legend>Who can approve?</legend><p className="field-help">Choose one or more people who can approve this activity.</p><div className="approver-options">{space.members.filter(m=>m.memberId!==user.id).map(m=><label className="person-option" key={m.memberId}><input type="checkbox" name="approver" value={m.memberId}/><Avatar member={data.members.find(x=>x.id===m.memberId)!}/><span>{memberName(data,m.memberId)}</span></label>)}</div></fieldset>}</>}<label className="check"><input type="checkbox" name="goals" defaultChecked/> Count toward this Rally's shared goals</label><button className="primary">Add activity</button></form>
   {canManage&&<p className="admin-note">Lifecycle controls like pause, archive, restore, point changes, and delete belong in Rally Settings so this page stays focused on doing.</p>}
  </>}
 
@@ -420,9 +444,43 @@ function SpaceSettings({data,space,user,update,note}:{data:AppData;space:Space;u
  const acts=data.activities.filter(a=>a.spaceId===space.id)
  const setStatus=(a:Activity,status:ActivityStatus)=>{update({...data,activities:data.activities.map((x):Activity=>x.id===a.id?{...x,status}:x)});note(status==='archived'?'Activity archived.':status==='paused'?'Activity paused.':'Activity restored.')}
  const remove=(a:Activity)=>{if(!confirm(`Permanently delete "${a.name}"? Historical audit entries will remain.`))return;update({...data,activities:data.activities.filter(x=>x.id!==a.id),history:[historyEntry({id:crypto.randomUUID(),spaceId:space.id,memberId:user.id,title:a.name,detail:'Activity permanently deleted. Historical entries preserved for audit.',points:0,kind:'admin',createdAt:now()}),...data.history]});note('Activity deleted.')}
+
+ const updateWeeklyLeaderboard=async(checked:boolean)=>{
+const {data:updatedSpace,error}=await supabase
+ .from('spaces')
+ .update({weekly_leaderboard:checked})
+ .eq('id',space.id)
+ .select('id, weekly_leaderboard')
+ .single()
+
+console.log('Weekly leaderboard update result:', {
+ updatedSpace,
+ error,
+ spaceId:space.id,
+ checked
+})
+
+  if(error){
+   console.error('Unable to update weekly leaderboard:',error)
+   note('Unable to update setting.')
+   return
+  }
+
+  update({
+   ...data,
+   spaces:data.spaces.map(s=>
+    s.id===space.id
+     ? {...s,weeklyLeaderboard:checked}
+     : s
+   )
+  })
+
+  note('Weekly leaderboard updated.')
+ }
+
  return <>
   <section className="settings-hero"><div><p>⚙️ RALLY SETTINGS</p><h1>{space.name}</h1><span>Manage how this Rally works without cluttering the everyday Activities page.</span></div></section>
-  <section className="panel settings-section"><div className="section-title"><div><p className="eyebrow">Rally options</p><h2>General settings</h2></div></div><div className="settings-options"><div><strong>Timezone</strong><span>{space.timezone}</span></div><label className="switch-row"><span><strong>Weekly leaderboard</strong><small>Show the friendly weekly competition.</small></span><input type="checkbox" checked={space.weeklyLeaderboard} onChange={e=>update({...data,spaces:data.spaces.map(s=>s.id===space.id?{...s,weeklyLeaderboard:e.target.checked}:s)})}/></label><label className="switch-row"><span><strong>Shared Rally point pool</strong><small>Allow this Rally to build a shared pool for group goals and treats.</small></span><input type="checkbox" checked={space.poolEnabled} onChange={e=>update({...data,spaces:data.spaces.map(s=>s.id===space.id?{...s,poolEnabled:e.target.checked}:s)})}/></label></div></section>
+  <section className="panel settings-section"><div className="section-title"><div><p className="eyebrow">Rally options</p><h2>General settings</h2></div></div><div className="settings-options"><div><strong>Timezone</strong><span>{space.timezone}</span></div><label className="switch-row"><span><strong>Weekly leaderboard</strong><small>Show the friendly weekly competition.</small></span><input type="checkbox" checked={space.weeklyLeaderboard} onChange={e=>updateWeeklyLeaderboard(e.target.checked)} /></label><label className="switch-row"><span><strong>Shared Rally point pool</strong><small>Allow this Rally to build a shared pool for group goals and treats.</small></span><input type="checkbox" checked={space.poolEnabled} onChange={e=>update({...data,spaces:data.spaces.map(s=>s.id===space.id?{...s,poolEnabled:e.target.checked}:s)})}/></label></div></section>
   <section className="panel settings-section"><div className="section-title"><div><p className="eyebrow">Activity lifecycle</p><h2>Manage activities</h2></div><span className="settings-count">{acts.length}</span></div><p className="settings-explainer">Pause something temporarily, archive it while keeping earned history, restore it later, or permanently delete it.</p><div className="settings-activity-list">{acts.map(a=><article className={`settings-activity-row ${a.status}`} key={a.id}><div className="settings-activity-info"><span className="activity-icon">{a.icon}</span><div><strong>{a.name}</strong><small>{a.category} · {a.points} points · {a.recurrence}</small><span className={`status-tag ${a.status}`}>{a.status}</span></div></div><div className="settings-activity-actions">{a.status==='archived'?<button className="secondary" onClick={()=>setStatus(a,'open')}>Restore</button>:<><button className="secondary" onClick={()=>setStatus(a,a.status==='paused'?'open':'paused')}>{a.status==='paused'?'Resume':'Pause'}</button><button className="secondary" onClick={()=>setStatus(a,'archived')}>Archive</button></>}<button className="danger" onClick={()=>remove(a)}>Delete</button></div></article>)}</div></section>
  </>}
 function Community({data,user,spaces,update,note}:{data:AppData;user:Member;spaces:Space[];update:(d:AppData)=>void;note:(s:string)=>void}){
