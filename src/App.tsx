@@ -303,8 +303,7 @@ if (!authenticated) {
 </div>
   </header>
 
-  {inviteOpen&&<CreateSpace data={data} update={update} user={user} close={()=>setInviteOpen(false)}/>}
-
+{inviteOpen&&<CreateSpace data={data} update={update} user={user} authUser={authUser} close={()=>setInviteOpen(false)}/>}
   <main>
    {spaceId==='all'?<AllView data={data} user={user} spaces={spaces} screen={screen} setScreen={setScreen} setSpaceId={setSpaceId}/>:activeSpace&&<>
     <SpaceHeader space={activeSpace} role={myRole} openSettings={()=>setScreen('settings')}/>
@@ -528,7 +527,84 @@ function Notifications({data,user,update,setSpaceId,setScreen}:{data:AppData;use
 }
 function NotificationSettings({data,user,update}:{data:AppData;user:Member;update:(d:AppData)=>void}){const p=data.notificationPrefs[user.id]||{leaderboard:true,approvals:true,milestones:true,tiers:true,daily:false,community:true};return <section className="panel"><h2>Notification preferences</h2>{Object.entries(p).map(([k,v])=><label className="check" key={k}><input type="checkbox" checked={v} onChange={e=>update({...data,notificationPrefs:{...data.notificationPrefs,[user.id]:{...p,[k]:e.target.checked}}})}/>{k==='daily'?'Daily kickoff':k[0].toUpperCase()+k.slice(1)}</label>)}</section>}
 
-function CreateSpace({data,update,user,close}:{data:AppData;update:(d:AppData)=>void;user:Member;close:()=>void}){
- const submit=(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);const id=crypto.randomUUID();const s:Space={id,name:String(f.get('name')),icon:String(f.get('icon')||'🎯'),type:String(f.get('type')) as SpaceType,timezone:String(f.get('timezone')),weeklyLeaderboard:true,poolEnabled:false,poolBalance:0,members:[{memberId:user.id,role:'Owner',balance:0,lifetime:0,weekly:0,joinedAt:new Date().toLocaleDateString()}]};update({...data,spaces:[...data.spaces,s]});close()}
+function CreateSpace({
+  data,
+  update,
+  user,
+  close,
+  authUser
+}:{
+  data:AppData
+  update:(d:AppData)=>void
+  user:Member
+  close:()=>void
+  authUser:User|null
+}){
+ const submit=async(e:FormEvent<HTMLFormElement>)=>{
+  e.preventDefault()
+
+  if(!authUser){
+   console.error('No authenticated user available.')
+   return
+  }
+
+  const f=new FormData(e.currentTarget)
+  const name=String(f.get('name')).trim()
+  const icon=String(f.get('icon')||'🎯')
+  const type=String(f.get('type')) as SpaceType
+  const timezone=String(f.get('timezone'))
+
+  const {data:createdSpace,error}=await supabase
+   .from('spaces')
+   .insert({
+    name,
+    icon,
+    type,
+    created_by:authUser.id
+   })
+   .select()
+   .single()
+
+  if(error){
+   console.error('Unable to create Rally Space:',error)
+   return
+  }
+
+  const {error:memberError}=await supabase
+ .from('space_members')
+ .insert({
+  space_id:createdSpace.id,
+  user_id:authUser.id,
+  role:'owner'
+ })
+
+if(memberError){
+ console.error('Unable to add owner to Rally Space:',memberError)
+ return
+}
+
+  const s:Space={
+   id:createdSpace.id,
+   name:createdSpace.name,
+   icon:createdSpace.icon||'🎯',
+   type:createdSpace.type as SpaceType,
+   timezone,
+   weeklyLeaderboard:true,
+   poolEnabled:false,
+   poolBalance:0,
+   members:[{
+    memberId:user.id,
+    role:'Owner',
+    balance:0,
+    lifetime:0,
+    weekly:0,
+    joinedAt:createdSpace.created_at||new Date().toISOString()
+   }]
+  }
+
+  update({...data,spaces:[...data.spaces,s]})
+  close()
+ }
+
  return <div className="modal-backdrop"><form className="modal" onSubmit={submit}><button type="button" className="close" onClick={close}>×</button><p className="eyebrow">New Rally Space</p><h2>Create a Rally</h2><label>Name<input name="name" required placeholder="Summer Fitness Crew"/></label><div className="two"><label>Type<select name="type"><option value="personal">Personal</option><option value="household">Household</option><option value="work">Work</option><option value="friends">Friends</option></select></label><label>Icon<input name="icon" placeholder="🏠"/></label></div><label>Timezone<input name="timezone" defaultValue="America/New_York"/></label><button className="primary">Create Rally</button></form></div>
 }
