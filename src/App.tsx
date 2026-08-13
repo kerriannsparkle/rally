@@ -130,8 +130,28 @@ useEffect(()=>{
 
  return ()=>subscription.unsubscribe()
 },[])
- console.log('Supabase connected:', supabase)
- const [data,setData]=useState<AppData>(load)
+
+useEffect(() => {
+  if (!authUser) return
+
+  const loadSpaces = async () => {
+    const { data, error } = await supabase
+      .from('spaces')
+      .select('*')
+
+    if (error) {
+      console.error('Unable to load spaces:', error)
+      return
+    }
+
+    console.log('Spaces from Supabase:', data)
+  }
+
+  loadSpaces()
+}, [authUser])
+
+console.log('Supabase connected:', supabase)
+const [data,setData]=useState<AppData>(load)
  const [spaceId,setSpaceId]=useState<string>('all')
  const [screen,setScreen]=useState<Screen>('home')
  const [toast,setToast]=useState('')
