@@ -135,7 +135,7 @@ useEffect(() => {
   if (!authUser) return
 
   const loadSpaces = async () => {
-    const { data, error } = await supabase
+    const { data: supabaseSpaces, error } = await supabase
       .from('spaces')
       .select('*')
 
@@ -144,7 +144,29 @@ useEffect(() => {
       return
     }
 
-    console.log('Spaces from Supabase:', data)
+    setData(current => ({
+      ...current,
+      spaces: supabaseSpaces.map(space => ({
+        id: space.id,
+        name: space.name,
+        icon: space.icon || '✨',
+        type: space.type as SpaceType,
+        timezone: 'America/New_York',
+        members: [
+          {
+            memberId: current.currentUserId,
+            role: 'Owner',
+            balance: 0,
+            lifetime: 0,
+            weekly: 0,
+            joinedAt: space.created_at || new Date().toISOString()
+          }
+        ],
+        weeklyLeaderboard: false,
+        poolEnabled: false,
+        poolBalance: 0
+      }))
+    }))
   }
 
   loadSpaces()
