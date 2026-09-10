@@ -166,7 +166,7 @@ useEffect(() => {
   // 2. Load only Rally memberships belonging to this user
   const {data:memberships,error:membershipError}=await supabase
    .from('space_members')
-   .select('space_id, role, joined_at, shared_contribution_total')
+   .select('space_id, user_id, role, joined_at, shared_contribution_total')
    .eq('user_id',authUser.id)
 
   if(membershipError){
@@ -176,98 +176,145 @@ useEffect(() => {
 
   const spaceIds=(memberships||[]).map(m=>m.space_id)
 
-  // Build the real Rally user from Supabase
-  const lifetimePoints=profile?.lifetime_points ?? 0
+// Build the real Rally user from Supabase
+const lifetimePoints=profile?.lifetime_points ?? 0
 
-  const currentMember:Member={
-   id:authUser.id,
-   name:
-    profile?.display_name ||
-    String(authUser.user_metadata?.display_name || '') ||
-    authUser.email?.split('@')[0] ||
-    'Rally User',
-   avatar:profile?.avatar_url || undefined,
-   globalLifetime:lifetimePoints,
-   tier:tierFor(lifetimePoints)
-  }
+const currentMember:Member={
+ id:authUser.id,
+ name:
+  profile?.display_name ||
+  String(authUser.user_metadata?.display_name || '') ||
+  authUser.email?.split('@')[0] ||
+  'Rally User',
+ avatar:profile?.avatar_url || undefined,
+ globalLifetime:lifetimePoints,
+ tier:tierFor(lifetimePoints)
+}
 
-  // User may not belong to any Rally Spaces yet
-  if(spaceIds.length===0){
-   setData(current=>({
-    ...current,
-    currentUserId:authUser.id,
-    members:[
-     currentMember,
-     ...current.members.filter(
-      member=>member.id!==authUser.id && member.id!==current.currentUserId
-     )
-    ],
-    spaces:[]
-   }))
+// User may not belong to any Rally Spaces yet
+if(spaceIds.length===0){
+ setData(current=>({
+  ...current,
+  currentUserId:authUser.id,
+  members:[currentMember],
+  spaces:[]
+ }))
 
-   return
-  }
+ return
+}
+
+// Load every member belonging to the user's Rally Spaces
+const {data:allMemberships,error:allMembershipsError}=await supabase
+ .from('space_members')
+ .select('space_id, user_id, role, joined_at, shared_contribution_total')
+ .in('space_id',spaceIds)
+
+if(allMembershipsError){
+ console.error('Unable to load Rally members:',allMembershipsError)
+ return
+}
+
+const memberIds=[
+ ...new Set(
+  (allMemberships||[]).map(member=>member.user_id)
+ )
+]
+
+// Load the profiles for those Rally members
+const {data:memberProfiles,error:memberProfilesError}=await supabase
+ .from('profiles')
+ .select('id, display_name, avatar_url, lifetime_points')
+ .in('id',memberIds)
+
+if(memberProfilesError){
+ console.error('Unable to load member profiles:',memberProfilesError)
+ return
+}
 
   // 3. Load only the spaces this user actually belongs to
-  const {data:supabaseSpaces,error:spacesError}=await supabase
-   .from('spaces')
-   .select('*')
-   .in('id',spaceIds)
+const {data:supabaseSpaces,error:spacesError}=await supabase
+ .from('spaces')
+ .select('*')
+ .in('id',spaceIds)
 
-  if(spacesError){
-   console.error('Unable to load Rally Spaces:',spacesError)
-   return
-  }
+if(spacesError){
+ console.error('Unable to load Rally Spaces:',spacesError)
+ return
+}
 
-  // 4. Convert Supabase memberships into Rally's current format
-  const appSpaces:Space[]=(supabaseSpaces||[]).map(space=>{
-   const membership=(memberships||[]).find(
-    member=>member.space_id===space.id
-   )
+// Build Rally's member list from Supabase profiles
+const loadedMembers:Member[]=memberIds.map(memberId=>{
 
-   return {
-    id:space.id,
-    name:space.name,
-    icon:space.icon || '✨',
-    type:space.type as SpaceType,
-    timezone:space.timezone || 'America/New_York',
+ const memberProfile=(memberProfiles||[]).find(
+  profile=>profile.id===memberId
+ )
 
-    members:membership ? [{
-     memberId:authUser.id,
-     role:normalizeRole(membership.role),
-     balance:0,
-     lifetime:0,
-     weekly:0,
-     joinedAt:
-      membership.joined_at ||
-      space.created_at ||
-      new Date().toISOString()
-    }] : [],
+ const memberLifetimePoints=
+  memberProfile?.lifetime_points ?? 0
 
-    weeklyLeaderboard:space.weekly_leaderboard ?? true,
-    poolEnabled:space.pool_enabled ?? false,
-    poolBalance:space.pool_balance ?? 0
-   }
-  })
-
-  // 5. Replace the fake current user + fake space access
-  setData(current=>({
-   ...current,
-
-   currentUserId:authUser.id,
-
-   members:[
-    currentMember,
-    ...current.members.filter(
-     member=>member.id!==authUser.id && member.id!==current.currentUserId
-    )
-   ],
-
-   spaces:appSpaces
-  }))
+ return {
+  id:memberId,
+  name:
+   memberProfile?.display_name ||
+   (memberId===authUser.id
+    ? currentMember.name
+    : 'Rally Member'),
+  avatar:memberProfile?.avatar_url || undefined,
+  globalLifetime:memberLifetimePoints,
+  tier:tierFor(memberLifetimePoints)
  }
+})
 
- loadAccount()
+// 4. Convert Supabase memberships into Rally's current format
+const appSpaces:Space[]=(supabaseSpaces||[]).map(space=>{
+
+ const spaceMemberships=(allMemberships||[]).filter(
+  membership=>membership.space_id===space.id
+ )
+
+ return {
+  id:space.id,
+  name:space.name,
+  icon:space.icon || '✨',
+  type:space.type as SpaceType,
+  timezone:space.timezone || 'America/New_York',
+
+  members:spaceMemberships.map(membership=>({
+   memberId:membership.user_id,
+   role:normalizeRole(membership.role || 'member'),
+   balance:0,
+   lifetime:
+    memberProfiles?.find(
+     profile=>profile.id===membership.user_id
+    )?.lifetime_points ?? 0,
+   weekly:0,
+   joinedAt:
+    membership.joined_at ||
+    space.created_at ||
+    new Date().toISOString()
+  })),
+
+  weeklyLeaderboard:
+   space.weekly_leaderboard ?? true,
+
+  poolEnabled:
+   space.pool_enabled ?? false,
+
+  poolBalance:
+   space.pool_balance ?? 0
+ }
+})
+
+// 5. Replace fake Rally users/spaces with Supabase data
+setData(current=>({
+ ...current,
+ currentUserId:authUser.id,
+ members:loadedMembers,
+ spaces:appSpaces
+}))
+}
+
+loadAccount()
 },[authUser])
 
 console.log('Supabase connected:', supabase)
