@@ -103,7 +103,22 @@ const POINT_OPTIONS=[5,10,15,20,25,30,40,50,75,100]
 const suggestedPoints=(name:string,category:string)=>{const t=(name+' '+category).toLowerCase();if(/deep|project|mow|presentation/.test(t))return 40;if(/laundry|workout|study|organize|module/.test(t))return 20;if(/feed|bed|trash|mail/.test(t))return 10;return 15}
 const roleFor=(s:Space,userId:string)=>s.members.find(m=>m.memberId===userId)?.role
 const spaceMember=(s:Space,userId:string)=>s.members.find(m=>m.memberId===userId)
+const normalizeRole=(role:string):Role=>{
+ const value=role.toLowerCase()
 
+ if(value==='owner') return 'Owner'
+ if(value==='admin') return 'Admin'
+ if(value==='approver') return 'Approver'
+
+ return 'Member'
+}
+
+const tierFor=(points:number)=>{
+ if(points>=6000) return 'Platinum'
+ if(points>=3000) return 'Gold'
+ if(points>=2000) return 'Silver'
+ return 'Bronze'
+}
 export default function App(){
 const [authenticated,setAuthenticated]=useState(false)
 const [sessionChecked,setSessionChecked]=useState(false)
@@ -132,45 +147,128 @@ useEffect(()=>{
 },[])
 
 useEffect(() => {
-  if (!authUser) return
+ if (!authUser) return
 
-  const loadSpaces = async () => {
-    const { data: supabaseSpaces, error } = await supabase
-      .from('spaces')
-      .select('*')
+ const loadAccount = async () => {
 
-    if (error) {
-      console.error('Unable to load spaces:', error)
-      return
-    }
+  // 1. Load the logged-in user's Rally profile
+  const {data:profile,error:profileError}=await supabase
+   .from('profiles')
+   .select('id, display_name, avatar_url, lifetime_points')
+   .eq('id',authUser.id)
+   .maybeSingle()
 
-    setData(current => ({
-      ...current,
-      spaces: supabaseSpaces.map(space => ({
-        id: space.id,
-        name: space.name,
-        icon: space.icon || '✨',
-        type: space.type as SpaceType,
-        timezone:space.timezone || 'America/New_York',
-        members: [
-          {
-            memberId: current.currentUserId,
-            role: 'Owner',
-            balance: 0,
-            lifetime: 0,
-            weekly: 0,
-            joinedAt: space.created_at || new Date().toISOString()
-          }
-        ],
-       weeklyLeaderboard:space.weekly_leaderboard ?? true,
-poolEnabled:space.pool_enabled ?? false,
-poolBalance:space.pool_balance ?? 0
-      }))
-    }))
+  if(profileError){
+   console.error('Unable to load profile:',profileError)
+   return
   }
 
-  loadSpaces()
-}, [authUser])
+  // 2. Load only Rally memberships belonging to this user
+  const {data:memberships,error:membershipError}=await supabase
+   .from('space_members')
+   .select('space_id, role, joined_at, shared_contribution_total')
+   .eq('user_id',authUser.id)
+
+  if(membershipError){
+   console.error('Unable to load Rally memberships:',membershipError)
+   return
+  }
+
+  const spaceIds=(memberships||[]).map(m=>m.space_id)
+
+  // Build the real Rally user from Supabase
+  const lifetimePoints=profile?.lifetime_points ?? 0
+
+  const currentMember:Member={
+   id:authUser.id,
+   name:
+    profile?.display_name ||
+    String(authUser.user_metadata?.display_name || '') ||
+    authUser.email?.split('@')[0] ||
+    'Rally User',
+   avatar:profile?.avatar_url || undefined,
+   globalLifetime:lifetimePoints,
+   tier:tierFor(lifetimePoints)
+  }
+
+  // User may not belong to any Rally Spaces yet
+  if(spaceIds.length===0){
+   setData(current=>({
+    ...current,
+    currentUserId:authUser.id,
+    members:[
+     currentMember,
+     ...current.members.filter(
+      member=>member.id!==authUser.id && member.id!==current.currentUserId
+     )
+    ],
+    spaces:[]
+   }))
+
+   return
+  }
+
+  // 3. Load only the spaces this user actually belongs to
+  const {data:supabaseSpaces,error:spacesError}=await supabase
+   .from('spaces')
+   .select('*')
+   .in('id',spaceIds)
+
+  if(spacesError){
+   console.error('Unable to load Rally Spaces:',spacesError)
+   return
+  }
+
+  // 4. Convert Supabase memberships into Rally's current format
+  const appSpaces:Space[]=(supabaseSpaces||[]).map(space=>{
+   const membership=(memberships||[]).find(
+    member=>member.space_id===space.id
+   )
+
+   return {
+    id:space.id,
+    name:space.name,
+    icon:space.icon || '✨',
+    type:space.type as SpaceType,
+    timezone:space.timezone || 'America/New_York',
+
+    members:membership ? [{
+     memberId:authUser.id,
+     role:normalizeRole(membership.role),
+     balance:0,
+     lifetime:0,
+     weekly:0,
+     joinedAt:
+      membership.joined_at ||
+      space.created_at ||
+      new Date().toISOString()
+    }] : [],
+
+    weeklyLeaderboard:space.weekly_leaderboard ?? true,
+    poolEnabled:space.pool_enabled ?? false,
+    poolBalance:space.pool_balance ?? 0
+   }
+  })
+
+  // 5. Replace the fake current user + fake space access
+  setData(current=>({
+   ...current,
+
+   currentUserId:authUser.id,
+
+   members:[
+    currentMember,
+    ...current.members.filter(
+     member=>member.id!==authUser.id && member.id!==current.currentUserId
+    )
+   ],
+
+   spaces:appSpaces
+  }))
+ }
+
+ loadAccount()
+},[authUser])
 
 console.log('Supabase connected:', supabase)
 const [data,setData]=useState<AppData>(load)
