@@ -306,7 +306,7 @@ const appActivities:Activity[]=(supabaseActivities||[]).map(activity=>{
   points:activity.points ?? 0,
   recurrence:activity.recurrence || 'One time',
   status:(activity.status || 'open') as ActivityStatus,
-  visibility:'space',
+  visibility:(activity.visibility || 'space') as Visibility,
   assignedTo,
   completionMode:
    (activity.completion_mode || 'shared_once') as CompletionMode,
@@ -602,10 +602,124 @@ function ActivityCard({a,data,user,complete,approve,sendBack}:{a:Activity;data:A
 function Activities({data,space,user,activities,complete,approve,sendBack,update,note}:{data:AppData;space:Space;user:Member;activities:Activity[];complete:(a:Activity)=>void;approve:(a:Activity)=>void;sendBack:(a:Activity)=>void;update:(d:AppData)=>void;note:(s:string)=>void}){
  const [name,setName]=useState('');const [category,setCategory]=useState('Home');const [requireApproval,setRequireApproval]=useState(false)
  const points=suggestedPoints(name,category)
- const add=(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);const assigned=Array.from(f.getAll('assigned')).map(String);const approvers=Array.from(f.getAll('approver')).map(String);const a:Activity={id:crypto.randomUUID(),spaceId:space.id,name:String(f.get('name')),icon:String(f.get('icon')||'✨'),category:String(f.get('category')),points:Number(f.get('points')),recurrence:String(f.get('recurrence')),status:'open',visibility:String(f.get('visibility')) as Visibility,assignedTo:assigned.length?assigned:space.members.map(m=>m.memberId),completionMode:String(f.get('completionMode')) as CompletionMode,approval:f.get('approval')==='on',approverIds:approvers,proofMode:String(f.get('proof')) as ProofMode,contributesToGoals:f.get('goals')==='on',
-pointDestination:String(f.get('pointDestination')||'personal') as 'personal'|'shared',
-version:1,
-createdBy:user.id};update({...data,activities:[a,...data.activities]});setName('');setRequireApproval(false);note('Activity added.')}
+const add=async(e:FormEvent<HTMLFormElement>)=>{
+ e.preventDefault()
+
+ const form=e.currentTarget
+ const f=new FormData(form)
+
+ const assigned=Array.from(
+  f.getAll('assigned')
+ ).map(String)
+
+ const approvers=Array.from(
+  f.getAll('approver')
+ ).map(String)
+
+ const assignedTo=assigned.length
+  ? assigned
+  : space.members.map(m=>m.memberId)
+
+ const activityId=crypto.randomUUID()
+
+ const a:Activity={
+  id:activityId,
+  spaceId:space.id,
+  name:String(f.get('name')),
+  icon:String(f.get('icon')||'✨'),
+  category:String(f.get('category')),
+  points:Number(f.get('points')),
+  recurrence:String(f.get('recurrence')),
+  status:'open',
+  visibility:String(f.get('visibility')) as Visibility,
+  assignedTo,
+  completionMode:
+   String(f.get('completionMode')) as CompletionMode,
+  approval:f.get('approval')==='on',
+  approverIds:approvers,
+  proofMode:String(f.get('proof')) as ProofMode,
+  contributesToGoals:f.get('goals')==='on',
+  pointDestination:
+   String(f.get('pointDestination')||'personal') as
+    'personal'|'shared',
+  version:1,
+  createdBy:user.id
+ }
+
+ const {error:activityError}=await supabase
+  .from('activities')
+  .insert({
+   id:activityId,
+   space_id:space.id,
+   name:a.name,
+   icon:a.icon,
+   category:a.category,
+   points:a.points,
+   recurrence:a.recurrence,
+   completion_mode:a.completionMode,
+   proof_mode:a.proofMode,
+   requires_approval:a.approval,
+   contributes_to_goals:a.contributesToGoals,
+   status:a.status,
+   created_by:user.id,
+   point_destination:a.pointDestination,
+   visibility:a.visibility
+  })
+
+ if(activityError){
+  console.error('Unable to create activity:',activityError)
+  note('Unable to add activity.')
+  return
+ }
+
+ const {error:assignmentError}=await supabase
+  .from('activity_assignments')
+  .insert(
+   assignedTo.map(userId=>({
+    activity_id:activityId,
+    user_id:userId
+   }))
+  )
+
+ if(assignmentError){
+  console.error(
+   'Unable to save activity assignments:',
+   assignmentError
+  )
+  note('Activity created, but assignments could not be saved.')
+  return
+ }
+
+ if(approvers.length>0){
+  const {error:approverError}=await supabase
+   .from('activity_approvers')
+   .insert(
+    approvers.map(userId=>({
+     activity_id:activityId,
+     user_id:userId
+    }))
+   )
+
+  if(approverError){
+   console.error(
+    'Unable to save activity approvers:',
+    approverError
+   )
+   note('Activity created, but approvers could not be saved.')
+   return
+  }
+ }
+
+ update({
+  ...data,
+  activities:[a,...data.activities]
+ })
+
+ form.reset()
+ setName('')
+ setRequireApproval(false)
+ note('Activity added.')
+}
  const canManage=['Owner','Admin'].includes(roleFor(space,user.id)||'')
  return <>
   <section className="activity-hero"><div><p>✓ THIS PERIOD</p><h1>Activities</h1><span>Incomplete activities simply earn no points. No overdue penalties.</span></div><b>{activities.filter(a=>a.status==='complete').length}/{activities.filter(a=>a.status!=='paused'&&a.status!=='archived').length}</b></section>
