@@ -305,15 +305,19 @@ const appActivities:Activity[]=(supabaseActivities||[]).map(activity=>{
   category:activity.category || 'General',
   points:activity.points ?? 0,
   recurrence:activity.recurrence || 'One time',
-  status:(activity.status || 'open') as ActivityStatus,
+  status:(activity.status==='active' ? 'open' : activity.status) as ActivityStatus,
   visibility:(activity.visibility || 'space') as Visibility,
   assignedTo,
   completionMode:
    (activity.completion_mode || 'shared_once') as CompletionMode,
-  approval:activity.requires_approval ?? false,
+  approval:activity.require_approval ?? false,
   approverIds,
   proofMode:
-   (activity.proof_mode || 'None') as ProofMode,
+ activity.proof_mode==='required_photo'
+  ? 'Required photo'
+  : activity.proof_mode==='optional_photo'
+   ? 'Optional photo'
+   : 'None',
   contributesToGoals:
    activity.contributes_to_goals ?? false,
   pointDestination:
@@ -657,10 +661,15 @@ const add=async(e:FormEvent<HTMLFormElement>)=>{
    points:a.points,
    recurrence:a.recurrence,
    completion_mode:a.completionMode,
-   proof_mode:a.proofMode,
-   requires_approval:a.approval,
+  proof_mode:
+ a.proofMode==='Required photo'
+  ? 'required_photo'
+  : a.proofMode==='Optional photo'
+   ? 'optional_photo'
+   : 'none',
+   require_approval:a.approval,
    contributes_to_goals:a.contributesToGoals,
-   status:a.status,
+   status:'active',
    created_by:user.id,
    point_destination:a.pointDestination,
    visibility:a.visibility
