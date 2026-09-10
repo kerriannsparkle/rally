@@ -241,7 +241,88 @@ if(spacesError){
  console.error('Unable to load Rally Spaces:',spacesError)
  return
 }
+// Load activities belonging to these Rally Spaces
+const {data:supabaseActivities,error:activitiesError}=await supabase
+ .from('activities')
+ .select('*')
+ .in('space_id',spaceIds)
 
+if(activitiesError){
+ console.error('Unable to load Rally activities:',activitiesError)
+ return
+}
+
+// Load assignments for those activities
+const activityIds=(supabaseActivities||[]).map(
+ activity=>activity.id
+)
+
+let activityAssignments:any[]=[]
+let activityApprovers:any[]=[]
+
+if(activityIds.length>0){
+
+ const {data:assignments,error:assignmentsError}=await supabase
+  .from('activity_assignments')
+  .select('activity_id, user_id')
+  .in('activity_id',activityIds)
+
+ if(assignmentsError){
+  console.error('Unable to load activity assignments:',assignmentsError)
+  return
+ }
+
+ activityAssignments=assignments || []
+
+ const {data:approvers,error:approversError}=await supabase
+  .from('activity_approvers')
+  .select('activity_id, user_id')
+  .in('activity_id',activityIds)
+
+ if(approversError){
+  console.error('Unable to load activity approvers:',approversError)
+  return
+ }
+
+ activityApprovers=approvers || []
+}
+// Convert Supabase activities into Rally's current Activity format
+const appActivities:Activity[]=(supabaseActivities||[]).map(activity=>{
+
+ const assignedTo=(activityAssignments||[])
+  .filter(assignment=>assignment.activity_id===activity.id)
+  .map(assignment=>assignment.user_id)
+
+ const approverIds=(activityApprovers||[])
+  .filter(approver=>approver.activity_id===activity.id)
+  .map(approver=>approver.user_id)
+
+ return {
+  id:activity.id,
+  spaceId:activity.space_id,
+  name:activity.name,
+  icon:activity.icon || '✨',
+  category:activity.category || 'General',
+  points:activity.points ?? 0,
+  recurrence:activity.recurrence || 'One time',
+  status:(activity.status || 'open') as ActivityStatus,
+  visibility:'space',
+  assignedTo,
+  completionMode:
+   (activity.completion_mode || 'shared_once') as CompletionMode,
+  approval:activity.requires_approval ?? false,
+  approverIds,
+  proofMode:
+   (activity.proof_mode || 'None') as ProofMode,
+  contributesToGoals:
+   activity.contributes_to_goals ?? false,
+  pointDestination:
+   (activity.point_destination || 'personal') as
+    'personal'|'shared',
+  version:1,
+  createdBy:activity.created_by || authUser.id
+ }
+})
 // Build Rally's member list from Supabase profiles
 const loadedMembers:Member[]=memberIds.map(memberId=>{
 
@@ -310,7 +391,8 @@ setData(current=>({
  ...current,
  currentUserId:authUser.id,
  members:loadedMembers,
- spaces:appSpaces
+ spaces:appSpaces,
+activities:appActivities
 }))
 }
 
