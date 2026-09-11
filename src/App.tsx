@@ -6,7 +6,7 @@ import Auth from './Auth'
 
 type SpaceType='personal'|'household'|'work'|'friends'
 type Role='Owner'|'Admin'|'Approver'|'Member'
-type Screen='home'|'activities'|'leaderboard'|'stats'|'goals'|'treats'|'community'|'notifications'|'members'|'settings'|'profile'|'account-settings'|'plan'|'friends'|'activity-settings'
+type Screen='home'|'activities'|'leaderboard'|'stats'|'goals'|'treats'|'community'|'notifications'|'members'|'settings'|'profile'|'account-settings'|'plan'|'friends'|'activity-settings'|'how-it-works'
 type ActivityStatus='open'|'pending'|'complete'|'paused'|'archived'
 type Visibility='space'|'private'|'selected'
 type ProofMode='None'|'Optional photo'|'Required photo'
@@ -2273,55 +2273,57 @@ const [data,setData]=useState<AppData>(load)
 if (!authenticated) {
   return <Auth onAuthenticated={() => setAuthenticated(true)} />
 }
- return <div className="app rally9-app">
-  {toast&&<div className="toast">{toast}</div>}
+ return <div className="app rally9-app canva-app-shell">
+  {toast&&<div className="toast canva-toast"><RallySparkMascot mood="cheer"/><span>{toast}</span></div>}
 
-  <header className="topbar rally9-topbar">
-   <button
-    className="brand"
-    onClick={()=>{setSpaceId('all');setScreen('home')}}
-    aria-label="Go to Rally home"
-   >
-    <span>{BRAND.logo}</span><b>{BRAND.name}</b>
-   </button>
-
-   <div className="top-context">
-    {activeSpace
-     ? <button
-        className="context-space-pill"
-        onClick={()=>{setSpaceId('all');setScreen('home')}}
-       >
-        <span>←</span> {activeSpace.icon} {activeSpace.name}
-       </button>
-     : <span className="context-home-copy">Make progress feel good.</span>
-    }
-   </div>
-
-   <div className="top-actions">
+  <header className="topbar rally9-topbar canva-topbar">
+   <div className="canva-topbar-inner">
     <button
-     className="top-create-button"
-     onClick={()=>setInviteOpen(true)}
-     title="Create a Rally"
+     className="brand canva-brand"
+     onClick={()=>{setSpaceId('all');setScreen('home')}}
+     aria-label="Go to Rally home"
     >
-     ＋ <span>New Rally</span>
+     <RallyBrandMark/>
+     <b>{BRAND.name}</b>
     </button>
 
-    <button
-     className="bell"
-     title="Notifications"
-     aria-label="Notifications"
-     onClick={()=>{setSpaceId('all');setScreen('notifications')}}
-    >
-     🔔{unread>0&&<b>{unread}</b>}
-    </button>
+    <div className="top-actions canva-top-actions">
+     <label className="sr-only" htmlFor="rally-space-switcher">Choose a Rally</label>
+     <select
+      id="rally-space-switcher"
+      className="canva-space-select"
+      value={spaceId}
+      onChange={e=>{setSpaceId(e.target.value);setScreen('home')}}
+     >
+      <option value="all">All Rallies</option>
+      {spaces.map(space=><option key={space.id} value={space.id}>{space.icon} {space.name}</option>)}
+     </select>
 
-    <button
-     className="profile-shortcut"
-     onClick={()=>{setSpaceId('all');setScreen('profile')}}
-     aria-label="Profile"
-    >
-     <Avatar member={user}/>
-    </button>
+     <button
+      className="primary-button canva-new-rally"
+      onClick={()=>setInviteOpen(true)}
+      title="Create a Rally"
+     >
+      ＋ <span>New Rally</span>
+     </button>
+
+     <button
+      className="icon-button canva-icon-button bell"
+      title="Notifications"
+      aria-label="Notifications"
+      onClick={()=>{setSpaceId('all');setScreen('notifications')}}
+     >
+      🔔{unread>0&&<b className="canva-notification-count">{unread}</b>}
+     </button>
+
+     <button
+      className="profile-shortcut canva-profile-shortcut"
+      onClick={()=>{setSpaceId('all');setScreen('profile')}}
+      aria-label="Profile"
+     >
+      <Avatar member={user}/>
+     </button>
+    </div>
    </div>
   </header>
 
@@ -2371,6 +2373,10 @@ if (!authenticated) {
     />
    }
 
+   {screen==='how-it-works'&&
+    <HowRallyWorks setScreen={setScreen}/>
+   }
+
    {screen==='account-settings'&&
     <AccountSettings data={data} user={user} update={update} note={note}/>
    }
@@ -2399,7 +2405,7 @@ if (!authenticated) {
     />
    }
 
-   {!['notifications','community','profile','account-settings','plan','friends','activity-settings'].includes(screen)&&spaceId==='all'&&
+   {!['notifications','community','profile','account-settings','plan','friends','activity-settings','how-it-works'].includes(screen)&&spaceId==='all'&&
     <>
      {screen==='activities'
       ? <GlobalActivities
@@ -2429,7 +2435,7 @@ if (!authenticated) {
     </>
    }
 
-   {!['notifications','community','profile','account-settings','plan','friends','activity-settings'].includes(screen)&&spaceId!=='all'&&activeSpace&&
+   {!['notifications','community','profile','account-settings','plan','friends','activity-settings','how-it-works'].includes(screen)&&spaceId!=='all'&&activeSpace&&
     <>
      <SpaceHeader
       space={activeSpace}
@@ -2521,32 +2527,154 @@ if (!authenticated) {
   </main>
 
   <nav className="nav rally9-nav" aria-label="Main navigation">
-   <NavButton
-    active={spaceId==='all'&&screen==='home'}
-    icon="⌂"
-    label="Home"
-    go={()=>{setSpaceId('all');setScreen('home')}}
-   />
-   <NavButton
-    active={spaceId==='all'&&screen==='activities'}
-    icon="✓"
-    label="Activities"
-    go={()=>{setSpaceId('all');setScreen('activities')}}
-   />
-   <NavButton
-    active={screen==='community'}
-    icon="◉"
-    label="Community"
-    go={()=>{setSpaceId('all');setScreen('community')}}
-   />
-   <NavButton
-    active={['profile','account-settings','plan','friends','activity-settings'].includes(screen)}
-    icon="☺"
-    label="Profile"
-    go={()=>{setSpaceId('all');setScreen('profile')}}
-   />
+   {spaceId!=='all'&&activeSpace&&!['notifications','community','profile','account-settings','plan','friends','activity-settings','how-it-works'].includes(screen)
+    ? <>
+       <NavButton
+        active={screen==='home'}
+        icon="⌂"
+        label="Home"
+        go={()=>setScreen('home')}
+       />
+       <NavButton
+        active={screen==='activities'}
+        icon="▣"
+        label="Activities"
+        go={()=>setScreen('activities')}
+       />
+       {activeSpace.members.length>1&&activeSpace.weeklyLeaderboard&&
+        <NavButton
+         active={screen==='leaderboard'}
+         icon="♛"
+         label="Leaderboard"
+         go={()=>setScreen('leaderboard')}
+        />
+       }
+       <NavButton
+        active={screen==='goals'}
+        icon="◎"
+        label="Goals"
+        go={()=>setScreen('goals')}
+       />
+       <NavButton
+        active={screen==='treats'}
+        icon="▦"
+        label="Treats"
+        go={()=>setScreen('treats')}
+       />
+      </>
+    : <>
+       <NavButton
+        active={spaceId==='all'&&screen==='home'}
+        icon="⌂"
+        label="Home"
+        go={()=>{setSpaceId('all');setScreen('home')}}
+       />
+       <NavButton
+        active={spaceId==='all'&&screen==='activities'}
+        icon="▣"
+        label="Activities"
+        go={()=>{setSpaceId('all');setScreen('activities')}}
+       />
+       <NavButton
+        active={screen==='community'}
+        icon="◉"
+        label="Community"
+        go={()=>{setSpaceId('all');setScreen('community')}}
+       />
+       <NavButton
+        active={['profile','account-settings','plan','friends','activity-settings','how-it-works'].includes(screen)}
+        icon="☺"
+        label="Profile"
+        go={()=>{setSpaceId('all');setScreen('profile')}}
+       />
+      </>
+   }
   </nav>
  </div>
+}
+
+
+function RallyBrandMark(){
+ return <span className="canva-brand-mark" aria-hidden="true">
+  <svg viewBox="0 0 64 64" width="26" height="26">
+   <path fill="#de705d" stroke="#292522" strokeWidth="3" d="M32 4l7 21 21 7-21 7-7 21-7-21-21-7 21-7z"/>
+  </svg>
+ </span>
+}
+
+function RallySparkMascot({mood='happy'}:{mood?:'happy'|'cheer'|'wait'}){
+ return <span className="rally-spark mascot-inline" aria-hidden="true">
+  <svg viewBox="0 0 100 100" className="spark-svg">
+   <path fill="#ffd34c" stroke="#292522" strokeWidth="3" strokeLinejoin="round" d="M50 5l10 34 35 11-35 11-10 34-10-34L5 50l35-11z"/>
+   <circle cx="39" cy="47" r="2.6" fill="#292522"/><circle cx="61" cy="47" r="2.6" fill="#292522"/>
+   {mood==='cheer'
+    ? <><path className="spark-face" d="M38 57q12 13 24 0"/><path className="spark-face" d="M33 39l7-3m20 0l7 3"/></>
+    : mood==='wait'
+     ? <><path className="spark-face" d="M39 59q11-6 22 0"/><path className="spark-face" d="M34 39l7-3m18 0l7 3"/></>
+     : <path className="spark-face" d="M40 58q10 9 20 0"/>
+   }
+  </svg>
+ </span>
+}
+
+function CanvaStateArt({state,icon}:{state:'ready'|'waiting'|'done';icon?:string}){
+ return <div className={`state-art ${state}`} aria-hidden="true">
+  {state==='done'
+   ? <RallySparkMascot mood="cheer"/>
+   : icon
+    ? <span className="state-emoji">{icon}</span>
+    : <span className="state-symbol">{state==='waiting'?'◷':'✓'}</span>
+  }
+ </div>
+}
+
+function MomentumRoute(){
+ return <div className="hero-route" aria-hidden="true">
+  <svg className="route-svg" viewBox="0 0 220 280">
+   <path className="route-line" d="M28 251C21 204 141 221 106 153S86 77 176 35"/>
+   <circle cx="29" cy="250" r="11" fill="#ffd34c" stroke="#292522" strokeWidth="2.5"/>
+   <circle cx="91" cy="190" r="8" fill="#fff" stroke="#292522" strokeWidth="2.5"/>
+   <circle cx="110" cy="132" r="10" fill="#ffd34c" stroke="#292522" strokeWidth="2.5"/>
+   <path className="route-line ink" d="M174 71V25m0 0h34l-10 13 10 13h-34"/>
+   <path fill="#de705d" stroke="#292522" strokeWidth="2.5" d="M174 25h34l-10 13 10 13h-34z"/>
+   <path fill="#ffd34c" stroke="#292522" strokeWidth="2.5" d="M46 215l5 13 13 5-13 5-5 13-5-13-13-5 13-5z"/>
+   <path fill="#ffd34c" stroke="#292522" strokeWidth="2.5" d="M119 64l4 10 10 4-10 4-4 10-4-10-10-4 10-4z"/>
+  </svg>
+ </div>
+}
+
+function DestinationScene({kind='goal'}:{kind?:'goal'|'treat'|'movie'}){
+ if(kind==='treat') return <div className="destination-scene mint" aria-hidden="true">
+  <svg viewBox="0 0 320 130">
+   <path className="scene-path" d="M12 102c58-58 103 14 168-38 37-30 72-19 129-52"/>
+   <path className="scene-ink" d="M263 87V32m0 0h35l-10 14 10 14h-35"/>
+   <path fill="#de705d" stroke="#292522" strokeWidth="2.4" d="M263 32h35l-10 14 10 14h-35z"/>
+   <circle className="scene-fill" cx="45" cy="90" r="10"/>
+   <path fill="#fff0af" stroke="#292522" strokeWidth="2.4" d="M135 67c0-18 27-18 27 0 0-18 27-18 27 0 0 15-54 15-54 0z"/>
+   <path fill="#ffd34c" stroke="#292522" strokeWidth="2.4" d="M145 67h32l-6 38h-20z"/>
+  </svg>
+ </div>
+ if(kind==='movie') return <div className="destination-scene pink" aria-hidden="true">
+  <svg viewBox="0 0 320 130">
+   <path className="scene-path" d="M16 107c49-38 69 8 131-30s91 13 159-52"/>
+   <circle className="scene-fill" cx="35" cy="97" r="10"/>
+   <rect x="192" y="32" width="79" height="55" rx="8" fill="#fff9ee" stroke="#292522" strokeWidth="2.4"/>
+   <path className="scene-ink" d="M200 43h63M206 92l-10 21m62-21 10 21"/>
+   <circle fill="#ffd34c" stroke="#292522" strokeWidth="2" cx="229" cy="59" r="5"/><path className="scene-ink" d="M220 73h20"/>
+  </svg>
+ </div>
+ return <div className="destination-scene" aria-hidden="true">
+  <svg viewBox="0 0 460 130">
+   <path className="scene-path" d="M22 106C71 49 126 125 176 73s89 26 145-28 76-7 120-37"/>
+   <circle className="scene-fill" cx="25" cy="104" r="10"/><circle fill="#fff" stroke="#292522" strokeWidth="2.4" cx="177" cy="73" r="8"/><circle className="scene-fill" cx="317" cy="45" r="10"/>
+   <path className="scene-ink" d="M429 76V20m0 0h25l-8 13 8 13h-25"/><path fill="#de705d" stroke="#292522" strokeWidth="2.4" d="M429 20h25l-8 13 8 13h-25z"/>
+  </svg>
+ </div>
+}
+
+function PennantBadge({children,tone='coral'}:{children?:any;tone?:'coral'|'sun'|'mint'}){
+ const fill=tone==='sun'?'#ffd34c':tone==='mint'?'#dff3e8':'#de705d'
+ return <span className="pennant"><svg viewBox="0 0 36 28" aria-hidden="true"><path fill={fill} stroke="#292522" strokeWidth="2" d="M4 2v24M5 3h26L23 10l8 7H5z"/></svg>{children}</span>
 }
 
 function Avatar({member}:{member:Member}){
@@ -2569,35 +2697,28 @@ function Progress({value,max}:{value:number;max:number}){
 
 function SpaceHeader({space,role,backHome,openSettings}:{space:Space;role?:Role;backHome:()=>void;openSettings:()=>void}){
  const canManage=role==='Owner'||role==='Admin'
- return <section className={`space-header rally9-space-header ${space.type}`}>
-  <button className="space-back" onClick={backHome}>← Home</button>
-  <div className="space-title-lockup">
-   <span className="space-hero-icon">{space.icon}</span>
-   <div>
-    <p>{space.type==='personal'?'PERSONAL RALLY':`${space.type.toUpperCase()} RALLY`}</p>
-    <h1>{space.name}</h1>
-    <span>{space.members.length} {space.members.length===1?'member':'members'} · {role}</span>
-   </div>
+ return <section className="space-header rally9-space-header figma-space-header">
+  <button className="space-back figma-icon-button" onClick={backHome} aria-label="Back to all Rallies">←</button>
+  <div className="figma-space-pill" title={`${space.name} · ${role||'Member'}`}>
+   <span>{space.icon}</span>
+   <strong>{space.name}</strong>
+   <small>{role||'Member'}</small>
   </div>
-  {canManage&&
-   <button className="space-settings-button" onClick={openSettings}>
-    ⚙️ Settings
-   </button>
+  {canManage
+   ? <button className="figma-icon-button" onClick={openSettings} aria-label="Rally settings">⚙</button>
+   : <span className="figma-header-spacer"/>
   }
  </section>
 }
 
 function RallyTabs({screen,space,setScreen}:{screen:Screen;space:Space;setScreen:(s:Screen)=>void}){
  const tabs:{screen:Screen;label:string}[]=[
-  {screen:'home',label:'Overview'},
-  {screen:'activities',label:'Activities'},
-  {screen:'goals',label:'Goals'},
-  {screen:'treats',label:'Treats'},
   {screen:'members',label:'Members'},
-  {screen:'stats',label:'Insights'}
+  {screen:'stats',label:'Insights'},
+  {screen:'settings',label:'Settings'}
  ]
 
- return <nav className="rally-tabs" aria-label={`${space.name} navigation`}>
+ return <nav className="rally-tabs figma-utility-tabs" aria-label={`${space.name} more options`}>
   {tabs.map(tab=>
    <button
     key={tab.screen}
@@ -2655,20 +2776,16 @@ function GlobalHome({data,user,spaces,activities,complete,approve,sendBack,respo
    const aPriority=a.priorityFor.includes(user.id)?0:1
    const bPriority=b.priorityFor.includes(user.id)?0:1
    if(aPriority!==bPriority) return aPriority-bPriority
-   const aBalance=spaceMember(
-    spaces.find(space=>space.id===a.spaceId)!,user.id
-   )?.balance||0
-   const bBalance=spaceMember(
-    spaces.find(space=>space.id===b.spaceId)!,user.id
-   )?.balance||0
+   const aSpace=spaces.find(space=>space.id===a.spaceId)
+   const bSpace=spaces.find(space=>space.id===b.spaceId)
+   const aBalance=aSpace?spaceMember(aSpace,user.id)?.balance||0:0
+   const bBalance=bSpace?spaceMember(bSpace,user.id)?.balance||0:0
    return Math.max(0,a.points-aBalance)-Math.max(0,b.points-bBalance)
   })[0]
 
  const topGoal=data.goals
   .filter(goal=>goal.status==='active'||goal.status==='reached')
-  .sort((a,b)=>
-   (b.progress/Math.max(1,b.target))-(a.progress/Math.max(1,a.target))
-  )[0]
+  .sort((a,b)=>(b.progress/Math.max(1,b.target))-(a.progress/Math.max(1,a.target)))[0]
 
  const motivationSpace=topTreat
   ? spaces.find(space=>space.id===topTreat.spaceId)
@@ -2676,198 +2793,188 @@ function GlobalHome({data,user,spaces,activities,complete,approve,sendBack,respo
    ? spaces.find(space=>space.id===topGoal.spaceId)
    : undefined
 
+ const motivatorValue=topTreat&&motivationSpace
+  ? spaceMember(motivationSpace,user.id)?.balance||0
+  : topGoal?.progress||0
+ const motivatorMax=topTreat?.points||topGoal?.target||7
+ const momentumPct=Math.min(100,Math.round((topTreat||topGoal)
+  ? motivatorValue/Math.max(1,motivatorMax)*100
+  : activeDays/7*100
+ ))
+
  const recentWins=data.history
   .filter(history=>history.memberId===user.id&&history.kind==='earn')
-  .slice(0,5)
+  .slice(0,3)
 
  const hasAnyActivities=activities.some(a=>
   a.assignedTo.includes(user.id)||a.createdBy===user.id
  )
+ const userSpaceIds=new Set(spaces.map(space=>space.id))
+ const hasMotivator=
+  data.goals.some(goal=>userSpaceIds.has(goal.spaceId)&&goal.status!=='archived')||
+  data.treats.some(treat=>userSpaceIds.has(treat.spaceId)&&treat.status!=='archived')
+ const totalWins=data.history.filter(history=>history.memberId===user.id&&history.kind==='earn').length
+ const onboardingSpace=spaces.find(space=>space.type==='personal')||spaces[0]
+ const [guideDismissed,setGuideDismissed]=useState(()=>
+  localStorage.getItem(`rally-how-it-works-dismissed:${user.id}`)==='1'
+ )
+ const dismissGuide=()=>{
+  localStorage.setItem(`rally-how-it-works-dismissed:${user.id}`,'1')
+  setGuideDismissed(true)
+ }
+ const goToMotivator=(screen:'goals'|'treats')=>{
+  if(!onboardingSpace) return
+  setSpaceId(onboardingSpace.id)
+  setScreen(screen)
+ }
+ const needsGettingStarted=Boolean(onboardingSpace)&&(!hasMotivator||!hasAnyActivities)
+ const showHowRallyWorks=!guideDismissed&&totalWins<3
+ const todayLabel=new Intl.DateTimeFormat(undefined,{weekday:'long'}).format(new Date())
 
  return <>
-  <section className="rally9-welcome">
+  <section className="canva-page-head canva-home-head">
    <div>
-    <p className="eyebrow">HOME</p>
-    <h1>Hey {user.name.split(' ')[0]} 👋</h1>
-    <p>Ready for a small win?</p>
-   </div>
-   <div className="welcome-score">
-    <strong>{totalWeekly}</strong>
-    <span>points this week</span>
+    <p className="eyebrow">All Rallies · {todayLabel}</p>
+    <h1>Hey {user.name.split(' ')[0]}, you’re doing brilliantly.</h1>
+    <p className="supporting">A few small wins can make the whole day feel lighter.</p>
    </div>
   </section>
 
-  {attentionCount>0&&
-   <section className="attention-panel">
-    <div className="section-title compact-title">
-     <div>
-      <p className="eyebrow">Needs your attention</p>
-      <h2>{attentionCount} {attentionCount===1?'item needs':'items need'} you</h2>
+  <div className="canva-grid-main">
+   <div className="canva-stack">
+    <section className="card hero-card canva-card">
+     <MomentumRoute/>
+     <div className="hero-content">
+      <p className="eyebrow">This week’s momentum</p>
+      <div className="summary-grid">
+       <div>
+        <div className="point-number">{totalWeekly.toLocaleString()}</div>
+        <p className="point-caption">points collected across your Rallies</p>
+       </div>
+       <div className="progress-ring" style={{'--progress':momentumPct} as any}>
+        <span>{momentumPct}%</span>
+       </div>
+      </div>
+      <div className="progress-track"><div className="progress-fill" style={{width:`${momentumPct}%`}}/></div>
+      <p className="supporting hero-progress-copy">
+       {topTreat?`${motivatorValue.toLocaleString()} of ${motivatorMax.toLocaleString()} points toward ${topTreat.name}`:
+        topGoal?`${motivatorValue.toLocaleString()} of ${motivatorMax.toLocaleString()} points toward ${topGoal.name}`:
+        `${activeDays} of 7 days active this week`}
+      </p>
+      <div className="summary-stats">
+       <div className="summary-stat"><strong>{activeDays} {activeDays===1?'day':'days'}</strong><span>active this week</span></div>
+       <div className="summary-stat"><strong>{weeklyWins.length} {weeklyWins.length===1?'win':'wins'}</strong><span>this week</span></div>
+       <div className="summary-stat"><strong>{user.tier}</strong><span>your tier</span></div>
+      </div>
      </div>
-    </div>
+    </section>
 
-    {pendingInvites.map(invitation=>
-     <PendingInvitationCard
-      key={invitation.id}
-      invitation={invitation}
-      respond={respondToInvite}
-     />
-    )}
-
-    {approvals.slice(0,3).map(activity=>
-     <ActivityCard
-      key={activity.id}
-      a={activity}
-      data={data}
-      user={user}
-      complete={complete}
-      approve={approve}
-      sendBack={sendBack}
-      showSpace
-     />
-    )}
-   </section>
-  }
-
-  <section className="panel home-up-next">
-   <div className="section-title">
-    <div>
-     <p className="eyebrow">Up next</p>
-     <h2>{ready.length?`${ready.length} ready for you`:'You’re all caught up 🎉'}</h2>
-    </div>
-    {ready.length>4&&
-     <button onClick={()=>setScreen('activities')}>See all →</button>
+    {attentionCount>0&&
+     <section className="card attention card-pad canva-card">
+      <div className="section-title">
+       <h2>Needs your attention</h2>
+       <span className="pill waiting">{attentionCount} waiting</span>
+      </div>
+      {pendingInvites.map(invitation=><PendingInvitationCard key={invitation.id} invitation={invitation} respond={respondToInvite}/>)}
+      {approvals.slice(0,3).map(activity=>{
+       const submitter=activity.approvalPendingBy?memberName(data,activity.approvalPendingBy):'Someone'
+       return <div className="list-row" key={activity.id}>
+        <CanvaStateArt state="waiting" icon={activity.icon}/>
+        <div className="row-text"><strong>{activity.name}</strong><span>{submitter} submitted this · {activity.points} points</span></div>
+        <button className="primary-button" onClick={()=>{setSpaceId(activity.spaceId);setScreen('activities')}}>Review</button>
+       </div>
+      })}
+     </section>
     }
-   </div>
 
-   {!hasAnyActivities&&
-    <div className="first-win-empty">
-     <span>✦</span>
-     <div>
-      <h3>Your first win starts here</h3>
-      <p>Add one small thing you’d like to make progress on.</p>
+    <section className="card card-pad canva-card">
+     <div className="section-title">
+      <h2>Up next</h2>
+      {ready.length>3&&<button className="link-button" onClick={()=>setScreen('activities')}>View all Rallies</button>}
      </div>
-     <button className="primary" onClick={()=>setScreen('activities')}>
-      + Add your first activity
-     </button>
-    </div>
-   }
-
-   {hasAnyActivities&&ready.length===0&&
-    <div className="empty friendly-empty">
-     Nothing needs your attention right now. Enjoy the win.
-    </div>
-   }
-
-   {ready.slice(0,4).map(activity=>
-    <ActivityCard
-     key={activity.id}
-     a={activity}
-     data={data}
-     user={user}
-     complete={complete}
-     approve={approve}
-     sendBack={sendBack}
-     showSpace
-    />
-   )}
-  </section>
-
-  <section className="home-rallies-section">
-   <div className="section-title">
-    <div>
-     <p className="eyebrow">Your Rallies</p>
-     <h2>{spaces.length===1?'Your Rally':'Your spaces'}</h2>
-    </div>
+     {!hasAnyActivities&&<div className="empty-state"><div className="mascot-wrap"><RallySparkMascot mood="happy"/></div><strong>Your first win starts here</strong><p>Add one small thing you’d like to make progress on.</p><button className="primary-button" onClick={()=>setScreen('activities')}>Add your first activity</button></div>}
+     {hasAnyActivities&&ready.length===0&&<div className="empty-state"><div className="mascot-wrap"><RallySparkMascot mood="cheer"/></div><strong>You’re all caught up</strong><p>Enjoy the extra breathing room.</p></div>}
+     {ready.slice(0,3).map(activity=>{
+      const space=spaces.find(item=>item.id===activity.spaceId)
+      return <div className="list-row" key={activity.id}>
+       <CanvaStateArt state="ready" icon={activity.icon}/>
+       <div className="row-text"><strong>{activity.name}</strong><span>{activity.recurrenceLabel||recurrenceLabel(activity.recurrence)}{space?` · ${space.name}`:''}</span></div>
+       <button className="secondary-button compact-complete" onClick={()=>complete(activity)}>Complete</button>
+       <span className="token">+{activity.points}</span>
+      </div>
+     })}
+    </section>
    </div>
 
-   <div className="rally-card-grid">
+   <aside className="canva-stack">
+    {(topTreat||topGoal)&&
+     <section className={`card card-pad canva-card ${topTreat?'treat-card':'goal-motivation-card'}`}>
+      <DestinationScene kind={topTreat?'treat':'goal'}/>
+      <div className="section-title">
+       <span className={`space-badge ${motivationSpace?.type||'personal'}`}>{motivationSpace?.icon||'✦'}</span>
+       <PennantBadge>{topTreat?'Next reward':'Active goal'}</PennantBadge>
+      </div>
+      <h2>{topTreat?topTreat.name:topGoal!.name}</h2>
+      <p className="supporting">{topTreat?'Keep going—your next Treat is getting closer.':'Every selected win can move this Goal forward.'}</p>
+      <div className="progress-track motivation-track"><div className="progress-fill" style={{width:`${momentumPct}%`}}/></div>
+      <p className="supporting motivation-progress">
+       {topTreat
+        ? `${Math.max(0,topTreat.points-motivatorValue).toLocaleString()} points to go`
+        : `${Math.max(0,topGoal!.target-topGoal!.progress).toLocaleString()} points to go`}
+      </p>
+     </section>
+    }
+
+    <section className="card card-pad win-card canva-card">
+     <div className="section-title"><h2>Recent wins</h2><RallySparkMascot mood="cheer"/></div>
+     {recentWins.length
+      ? recentWins.map(history=><div className="list-row" key={history.id}>
+         <CanvaStateArt state="done"/>
+         <div className="row-text"><strong>{history.title}</strong><span>{spaces.find(s=>s.id===history.spaceId)?.name||'Rally'} · {formatTimestamp(history.createdAt)}</span></div>
+         <span className="token">+{history.points}</span>
+        </div>)
+      : <div className="empty-state compact-empty"><strong>Your wins will show up here.</strong></div>
+     }
+    </section>
+   </aside>
+  </div>
+
+  <section className="canva-space-section">
+   <div className="section-title"><div><p className="eyebrow">Your Rallies</p><h2>{spaces.length===1?'Your space':'Your spaces'}</h2></div></div>
+   <div className="canva-space-grid">
     {spaces.map(space=>{
      const sm=spaceMember(space,user.id)!
-     const readyCount=data.activities.filter(a=>
-      a.spaceId===space.id&&
-      a.status==='open'&&
-      a.isAvailableNow!==false&&
-      (a.assignedTo.length===0||a.assignedTo.includes(user.id))
-     ).length
-     const rank=space.members.length>1
-      ? [...space.members]
-        .sort((a,b)=>b.weekly-a.weekly)
-        .findIndex(member=>member.memberId===user.id)+1
-      : 0
-
-     return <button
-      className={`rally-card ${space.type}`}
-      key={space.id}
-      onClick={()=>{setSpaceId(space.id);setScreen('home')}}
-     >
-      <span className="rally-card-icon">{space.icon}</span>
-      <div className="rally-card-main">
-       <strong>{space.name}</strong>
-       <small>{readyCount} ready{rank?` · #${rank} this week`:''}</small>
-      </div>
-      <div className="rally-card-points">
-       <b>{sm.weekly}</b>
-       <small>this week</small>
-      </div>
-      <span className="rally-card-arrow">→</span>
+     const readyCount=data.activities.filter(a=>a.spaceId===space.id&&a.status==='open'&&a.isAvailableNow!==false&&(a.assignedTo.length===0||a.assignedTo.includes(user.id))).length
+     return <button className="canva-space-card" key={space.id} onClick={()=>{setSpaceId(space.id);setScreen('home')}}>
+      <span className={`space-badge ${space.type}`}>{space.icon}</span>
+      <div><strong>{space.name}</strong><small>{readyCount} ready · {sm.weekly} pts this week</small></div>
+      <span>→</span>
      </button>
     })}
    </div>
   </section>
 
-  {(topTreat||topGoal)&&
-   <section className="motivation-card">
-    {topTreat?<>
-     <div className="motivation-icon">{topTreat.icon}</div>
-     <div className="motivation-copy">
-      <p className="eyebrow">Your next reward</p>
-      <h2>{topTreat.name}</h2>
-      <small>{motivationSpace?.icon} {motivationSpace?.name}</small>
-      <Progress
-       value={spaceMember(motivationSpace!,user.id)?.balance||0}
-       max={topTreat.points}
-      />
-      <b>{Math.max(0,topTreat.points-(spaceMember(motivationSpace!,user.id)?.balance||0))} points away</b>
-     </div>
-    </>:<>
-     <div className="motivation-icon">{topGoal!.icon}</div>
-     <div className="motivation-copy">
-      <p className="eyebrow">You’re building toward</p>
-      <h2>{topGoal!.name}</h2>
-      <small>{motivationSpace?.icon} {motivationSpace?.name}</small>
-      <Progress value={topGoal!.progress} max={topGoal!.target}/>
-      <b>{Math.max(0,topGoal!.target-topGoal!.progress)} points to go</b>
-     </div>
-    </>}
+  {needsGettingStarted&&onboardingSpace&&
+   <section className="card card-pad canva-onboarding-card">
+    <div className="section-title"><div><p className="eyebrow">Start with motivation</p><h2>Give your points a purpose.</h2></div><RallySparkMascot mood="happy"/></div>
+    <p className="supporting">Pick a Goal to track progress or a Treat to give yourself something fun to earn, then add an activity.</p>
+    <div className="canva-onboarding-actions">
+     {!hasMotivator&&<><button className="secondary-button" onClick={()=>goToMotivator('goals')}>🎯 Create a Goal</button><button className="secondary-button" onClick={()=>goToMotivator('treats')}>🎁 Create a Treat</button></>}
+     {!hasAnyActivities&&<button className="primary-button" onClick={()=>{setSpaceId('all');setScreen('activities')}}>＋ Add your first activity</button>}
+    </div>
    </section>
   }
 
-  <section className="weekly-strip">
-   <div><strong>{totalWeekly}</strong><span>points</span></div>
-   <div><strong>{weeklyWins.length}</strong><span>wins this week</span></div>
-   <div><strong>{activeDays}</strong><span>active {activeDays===1?'day':'days'}</span></div>
-  </section>
-
-  {recentWins.length>0&&
-   <section className="panel recent-wins-panel">
-    <div className="section-title">
-     <div><p className="eyebrow">Recent wins</p><h2>Keep it going</h2></div>
-    </div>
-    {recentWins.map(history=>
-     <div className="history-row" key={history.id}>
-      <span>{data.spaces.find(s=>s.id===history.spaceId)?.icon||'✦'}</span>
-      <div>
-       <strong>{history.title}</strong>
-       <small>{data.spaces.find(s=>s.id===history.spaceId)?.name} · {history.createdAt}</small>
-      </div>
-      <b>+{history.points}</b>
-     </div>
-    )}
+  {showHowRallyWorks&&
+   <section className="card card-pad canva-how-card">
+    <div className="section-title"><div><p className="eyebrow">How Rally works</p><h2>Get things done. See your progress. Stay motivated.</h2></div><RallySparkMascot mood="happy"/></div>
+    <p className="supporting">Complete activities to earn points. Points make progress visible, move the Goals you choose forward, and can unlock Treats you set for yourself.</p>
+    <div className="canva-how-actions"><button className="secondary-button" onClick={()=>setScreen('how-it-works')}>Learn how Rally works</button><button className="link-button" onClick={dismissGuide}>Got it</button></div>
    </section>
   }
  </>
 }
+
 
 function GlobalActivities({data,user,spaces,activities,complete,approve,sendBack,update,note}:{data:AppData;user:Member;spaces:Space[];activities:Activity[];complete:(a:Activity)=>void;approve:(a:Activity)=>void;sendBack:(a:Activity)=>void;update:(d:AppData)=>void;note:(s:string)=>void}){
  const [statusFilter,setStatusFilter]=useState<'ready'|'waiting'|'done'|'all'>('ready')
@@ -2887,104 +2994,51 @@ function GlobalActivities({data,user,spaces,activities,complete,approve,sendBack
  const filtered=relevant
   .filter(activity=>rallyFilter==='all'||activity.spaceId===rallyFilter)
   .filter(activity=>{
-   if(statusFilter==='ready'){
-    return activity.status==='open'&&activity.isAvailableNow!==false&&(
-     activity.assignedTo.length===0||activity.assignedTo.includes(user.id)
-    )
-   }
+   if(statusFilter==='ready') return activity.status==='open'&&activity.isAvailableNow!==false&&(activity.assignedTo.length===0||activity.assignedTo.includes(user.id))
    if(statusFilter==='waiting') return activity.status==='pending'||(Boolean(activity.approvalPending)&&activity.approverIds.includes(user.id))
    if(statusFilter==='done') return activity.status==='complete'
    return activity.status!=='archived'
   })
-  .sort((a,b)=>
-   recurrencePriority(a.recurrence)-recurrencePriority(b.recurrence)||
-   b.points-a.points
-  )
+  .sort((a,b)=>recurrencePriority(a.recurrence)-recurrencePriority(b.recurrence)||b.points-a.points)
 
  const createSpace=spaces.find(space=>space.id===createSpaceId)||spaces[0]
 
  return <>
-  <section className="page-heading simple-heading">
+  <section className="canva-page-head">
    <div>
-    <p className="eyebrow">Activities</p>
-    <h1>What’s worth doing next?</h1>
-    <p>Everything assigned to you, across every Rally.</p>
+    <p className="eyebrow">Make progress together</p>
+    <h1>Activities</h1>
+    <p className="supporting">Clear little actions, shared momentum.</p>
    </div>
+   <button className="primary-button" onClick={()=>document.getElementById('global-add-activity')?.setAttribute('open','true')}>＋ Add activity</button>
   </section>
 
-  <section className="activity-toolbar">
-   <div className="segmented activity-segments">
-    {([
-     ['ready','Ready'],
-     ['waiting','Waiting'],
-     ['done','Done'],
-     ['all','All']
-    ] as const).map(([value,label])=>
-     <button
-      key={value}
-      className={statusFilter===value?'active':''}
-      onClick={()=>setStatusFilter(value)}
-     >
-      {label}
-     </button>
+  <div className="canva-activity-tools">
+   <div className="segmented" role="tablist" aria-label="Activity filters">
+    {([['ready','Ready'],['waiting','Waiting'],['done','Done'],['all','All']] as const).map(([value,label])=>
+     <button key={value} className={statusFilter===value?'active':''} onClick={()=>setStatusFilter(value)}>{label}</button>
     )}
    </div>
+   <label className="canva-filter-select"><span>Rally</span><select value={rallyFilter} onChange={e=>setRallyFilter(e.target.value)}><option value="all">All Rallies</option>{spaces.map(space=><option value={space.id} key={space.id}>{space.icon} {space.name}</option>)}</select></label>
+  </div>
 
-   <label className="inline-filter">
-    <span>Rally</span>
-    <select value={rallyFilter} onChange={e=>setRallyFilter(e.target.value)}>
-     <option value="all">All Rallies</option>
-     {spaces.map(space=><option value={space.id} key={space.id}>{space.icon} {space.name}</option>)}
-    </select>
-   </label>
-  </section>
-
-  <section className="panel global-activity-list">
-   {filtered.length===0
-    ? <div className="empty friendly-empty">
-       {statusFilter==='ready'
-        ? 'Nothing is waiting on you right now 🎉'
-        : 'Nothing to show here yet.'
-       }
-      </div>
-    : filtered.map(activity=>
-       <ActivityCard
-        key={activity.id}
-        a={activity}
-        data={data}
-        user={user}
-        complete={complete}
-        approve={approve}
-        sendBack={sendBack}
-        showSpace
-       />
-      )
+  <section className="activity-grid canva-activity-grid">
+   {filtered.length
+    ? filtered.map(activity=><ActivityCard key={activity.id} a={activity} data={data} user={user} complete={complete} approve={approve} sendBack={sendBack} showSpace/>)
+    : <div className="empty-state" style={{gridColumn:'1/-1'}}><div className="mascot-wrap"><RallySparkMascot mood="wait"/></div><strong>Nothing here yet</strong><p>{statusFilter==='ready'?'You’re all caught up for now.':'There’s nothing to show in this view.'}</p></div>
    }
   </section>
 
-  {createSpace&&
-   <details className="panel create-activity-shell">
-    <summary>＋ Add activity</summary>
-    <div className="create-rally-picker">
-     <label>
-      Which Rally?
-      <select value={createSpace.id} onChange={e=>setCreateSpaceId(e.target.value)}>
-       {spaces.map(space=><option value={space.id} key={space.id}>{space.icon} {space.name}</option>)}
-      </select>
-     </label>
-    </div>
-    <AddActivityForm
-     key={createSpace.id}
-     data={data}
-     space={createSpace}
-     user={user}
-     update={update}
-     note={note}
-    />
-   </details>
-  }
+  {createSpace&&<details id="global-add-activity" className="canva-create-shell" open={relevant.length===0}>
+   <summary>＋ Add activity</summary>
+   <div className="canva-create-body">
+    <label className="canva-filter-select create-rally-picker"><span>Which Rally?</span><select value={createSpace.id} onChange={e=>setCreateSpaceId(e.target.value)}>{spaces.map(space=><option value={space.id} key={space.id}>{space.icon} {space.name}</option>)}</select></label>
+    <AddActivityForm key={createSpace.id} data={data} space={createSpace} user={user} update={update} note={note}/>
+   </div>
+  </details>}
  </>
 }
+
 
 function ActivityCard({a,data,user,complete,approve,sendBack,showSpace=false}:{a:Activity;data:AppData;user:Member;complete:(a:Activity)=>void;approve?:(a:Activity)=>void;sendBack?:(a:Activity)=>void;showSpace?:boolean}){
  const space=data.spaces.find(s=>s.id===a.spaceId)
@@ -2992,105 +3046,65 @@ function ActivityCard({a,data,user,complete,approve,sendBack,showSpace=false}:{a
  const isAssigned=a.assignedTo.length===0||a.assignedTo.includes(user.id)
  const availableNow=a.isAvailableNow!==false
  const mySpaceRole=space?.members.find(m=>m.memberId===user.id)?.role
-
- const canUndo=
-  a.status==='complete'&&(
-   a.completedBy===user.id||
-   mySpaceRole==='Admin'||
-   mySpaceRole==='Owner'
-  )
-
- const assignedNames=a.assignedTo
-  .map(id=>memberName(data,id))
-  .filter(Boolean)
-
+ const canUndo=a.status==='complete'&&(a.completedBy===user.id||mySpaceRole==='Admin'||mySpaceRole==='Owner')
+ const assignedNames=a.assignedTo.map(id=>memberName(data,id)).filter(Boolean)
  const target=a.periodTarget||1
  const progress=a.periodProgress||0
- const completionText=a.approval
-  ? 'Submit completion'
-  : a.proofMode==='Required photo'
-   ? 'Add proof & complete'
-   : `Complete +${a.points}`
+ const statusState:'ready'|'waiting'|'done' = a.status==='complete'?'done':(a.status==='pending'||a.approvalPending)?'waiting':'ready'
+ const statusLabel=statusState==='done'?'Completed':statusState==='waiting'?'Waiting for approval':availableNow?'Ready to go':'Not due yet'
+ const completionText=a.approval?'Submit for approval':a.proofMode==='Required photo'?'Add proof & complete':'Complete'
+ const periodPct=target>0?Math.min(100,Math.round(progress/target*100)):(a.status==='complete'?100:0)
+ const assignmentLine=canApprove&&a.approvalPendingBy
+  ? `Proof submitted by ${memberName(data,a.approvalPendingBy)}`
+  : a.status==='complete'&&a.completedBy
+   ? `Completed by ${memberName(data,a.completedBy)}`
+   : !isAssigned&&assignedNames.length
+    ? `Assigned to ${assignedNames.join(', ')}`
+    : assignedNames.length
+     ? `Assigned to ${assignedNames.join(', ')}`
+     : 'Ready when you are'
 
- const approvalMember=a.approvalPendingBy
-  ? memberName(data,a.approvalPendingBy)
-  : 'They'
-
- return <article className={`activity rally9-activity ${a.status} ${!availableNow&&a.status==='open'?'not-due':''}`}>
-  <span className="activity-icon">{a.icon}</span>
-  <div className="activity-copy">
-   <div className="activity-title-row">
-    <strong>{a.name}</strong>
-    {showSpace&&space&&<span className="space-badge">{space.icon} {space.name}</span>}
+ return <article className={`card activity-card canva-card ${statusState==='done'?'completed celebrate':''} ${!availableNow&&a.status==='open'?'not-due':''}`}>
+  <div className="activity-top">
+   <div>
+    <CanvaStateArt state={statusState} icon={a.icon}/>
+    <h2 className="activity-title">{a.name}</h2>
    </div>
-   <small>{a.category} · {a.points} pts</small>
-   <small className="activity-period">
-    {a.periodLabel||a.recurrenceLabel||recurrenceLabel(a.recurrence)}
-   </small>
-   {target>1&&
-    <div className="mini-progress-wrap">
-     <Progress value={progress} max={target}/>
-    </div>
-   }
-   {!availableNow&&a.status==='open'&&a.nextAvailableLabel&&
-    <small className="next-available">Next available {a.nextAvailableLabel}</small>
-   }
-   {!isAssigned&&a.status==='open'&&assignedNames.length>0&&
-    <small className="assignment-note">For {assignedNames.join(', ')}</small>
-   }
-   {a.status==='complete'&&a.completedBy&&space&&space.members.length>1&&
-    <small>Completed by {memberName(data,a.completedBy)}</small>
-   }
-   {canApprove&&
-    <small className="approval-points">{approvalMember} will earn +{a.points} points when approved.</small>
-   }
+   <span className={`pill ${statusState}`}>{statusLabel}</span>
   </div>
 
-  <div className="activity-actions">
-   {a.status==='open'&&isAssigned&&availableNow&&
-    <button className="primary completion-button" onClick={()=>complete(a)}>
-     {completionText}
-    </button>
-   }
+  <div className="meta">
+   <span>{a.category}</span>
+   <span>{a.recurrenceLabel||recurrenceLabel(a.recurrence)}</span>
+   {showSpace&&space&&<span>{space.icon} {space.name}</span>}
+  </div>
 
-   {a.status==='open'&&isAssigned&&!availableNow&&
-    <span className="not-due-label">Not due today</span>
-   }
+  <div>
+   <div className="progress-track"><div className="progress-fill" style={{width:`${a.status==='complete'?100:periodPct}%`,background:a.status==='complete'?'#7354b0':undefined}}/></div>
+   <p className="tiny-progress">{target>1?`${progress} of ${target} this period · `:''}{assignmentLine}</p>
+   {!availableNow&&a.nextAvailableLabel&&<p className="tiny-progress">Next available {a.nextAvailableLabel}</p>}
+  </div>
 
-   {canApprove&&<>
-    <button className="primary completion-button" onClick={()=>approve?.(a)}>
-     Approve
-    </button>
-    {a.approvalProofUrl&&
-     <button className="secondary" onClick={()=>window.open(a.approvalProofUrl,'_blank')}>
-      View proof
-     </button>
-    }
-    <button className="secondary" onClick={()=>sendBack?.(a)}>
-     Send back
-    </button>
-   </>}
-
-   {a.status==='pending'&&!canApprove&&
-    <span className="pending">Waiting for approval</span>
-   }
-
-   {a.status==='complete'&&<>
-    {a.proofUrl&&
-     <button className="secondary" onClick={()=>window.open(a.proofUrl,'_blank')}>
-      View proof
-     </button>
-    }
-    {canUndo
-     ? <button className="secondary subtle-action" onClick={()=>complete(a)}>
-        Undo
-       </button>
-     : <span className="complete">✓ Done</span>
-    }
-   </>}
+  <div className="activity-bottom">
+   <div className="canva-activity-actions">
+    {a.status==='open'&&isAssigned&&availableNow&&<button className="primary-button" onClick={()=>complete(a)}>✓ {completionText}</button>}
+    {a.status==='open'&&isAssigned&&!availableNow&&<span className="pill waiting">Not due today</span>}
+    {canApprove&&<>
+     <button className="primary-button" onClick={()=>approve?.(a)}>Approve</button>
+     {a.approvalProofUrl&&<button className="secondary-button" onClick={()=>window.open(a.approvalProofUrl,'_blank')}>View proof</button>}
+     <button className="secondary-button" onClick={()=>sendBack?.(a)}>Send back</button>
+    </>}
+    {a.status==='pending'&&!canApprove&&<span className="pill waiting">Waiting for approval</span>}
+    {a.status==='complete'&&<>
+     {a.proofUrl&&<button className="secondary-button" onClick={()=>window.open(a.proofUrl,'_blank')}>View proof</button>}
+     {canUndo?<button className="secondary-button" onClick={()=>complete(a)}>Undo completion</button>:<span className="pill done">✓ Completed</span>}
+    </>}
+   </div>
+   <span className="token">+{a.points}</span>
   </div>
  </article>
 }
+
 
 function AddActivityForm({data,space,user,update,note}:{data:AppData;space:Space;user:Member;update:(d:AppData)=>void;note:(s:string)=>void}){
  const solo=space.members.length===1
@@ -3376,6 +3390,7 @@ function AddActivityForm({data,space,user,update,note}:{data:AppData;space:Space
     <select name="points" defaultValue={String(points)} key={points}>
      {POINT_OPTIONS.map(point=><option value={point} key={point}>{point} points</option>)}
     </select>
+    <small>How motivating should this win be? Bigger or harder activities can be worth more.</small>
    </label>
   </div>
 
@@ -3624,7 +3639,7 @@ function AddActivityForm({data,space,user,update,note}:{data:AppData;space:Space
       <input type="checkbox" name="goals" defaultChecked/>
       {activeGoals.length===1
        ? <>Count these points toward “{activeGoals[0].name}”</>
-       : <>Count these points toward Rally goals</>
+       : <>Count these points toward this Rally’s Goals</>
       }
      </label>
     }
@@ -3638,7 +3653,6 @@ function AddActivityForm({data,space,user,update,note}:{data:AppData;space:Space
 function Activities({data,space,user,activities,complete,approve,sendBack,update,note}:{data:AppData;space:Space;user:Member;activities:Activity[];complete:(a:Activity)=>void;approve:(a:Activity)=>void;sendBack:(a:Activity)=>void;update:(d:AppData)=>void;note:(s:string)=>void}){
  const [filter,setFilter]=useState<'ready'|'waiting'|'done'|'all'>('ready')
  const canManage=['Owner','Admin'].includes(roleFor(space,user.id)||'')
-
  const filtered=activities.filter(activity=>{
   if(filter==='ready') return activity.status==='open'&&activity.isAvailableNow!==false
   if(filter==='waiting') return activity.status==='pending'||(Boolean(activity.approvalPending)&&activity.approverIds.includes(user.id))
@@ -3647,216 +3661,101 @@ function Activities({data,space,user,activities,complete,approve,sendBack,update
  })
 
  return <>
-  <section className="page-heading simple-heading rally-page-heading">
-   <div>
-    <p className="eyebrow">Activities</p>
-    <h1>Keep this Rally moving</h1>
-    <p>Complete what’s yours. Everything else stays out of the way.</p>
-   </div>
+  <section className="canva-page-head">
+   <div><p className="eyebrow">Make progress together</p><h1>Activities</h1><p className="supporting">Clear little actions, shared momentum.</p></div>
+   <button className="primary-button" onClick={()=>document.getElementById('space-add-activity')?.setAttribute('open','true')}>＋ Add activity</button>
   </section>
-
-  <div className="segmented activity-segments local-activity-filter">
-   {([
-    ['ready','Ready'],
-    ['waiting','Waiting'],
-    ['done','Done'],
-    ['all','All']
-   ] as const).map(([value,label])=>
-    <button
-     key={value}
-     className={filter===value?'active':''}
-     onClick={()=>setFilter(value)}
-    >
-     {label}
-    </button>
-   )}
+  <div className="segmented" role="tablist" aria-label="Activity filters">
+   {([['ready','Ready'],['waiting','Waiting'],['done','Done'],['all','All']] as const).map(([value,label])=><button key={value} className={filter===value?'active':''} onClick={()=>setFilter(value)}>{label}</button>)}
   </div>
-
-  <section className="panel">
+  <section className="activity-grid canva-activity-grid">
    {filtered.length
-    ? filtered.map(activity=>
-       <ActivityCard
-        key={activity.id}
-        a={activity}
-        data={data}
-        user={user}
-        complete={complete}
-        approve={approve}
-        sendBack={sendBack}
-       />
-      )
-    : <div className="empty friendly-empty">Nothing to show here right now.</div>
+    ? filtered.map(activity=><ActivityCard key={activity.id} a={activity} data={data} user={user} complete={complete} approve={approve} sendBack={sendBack}/>)
+    : <div className="empty-state" style={{gridColumn:'1/-1'}}><div className="mascot-wrap"><RallySparkMascot mood="wait"/></div><strong>Nothing here yet</strong><p>There’s nothing to show in this view.</p></div>
    }
   </section>
-
-  <details className="panel create-activity-shell">
-   <summary>＋ Add activity</summary>
-   <AddActivityForm
-    data={data}
-    space={space}
-    user={user}
-    update={update}
-    note={note}
-   />
-  </details>
-
-  {canManage&&
-   <p className="admin-note">
-    Need to pause, archive, restore, or delete something? Use Rally Settings.
-   </p>
-  }
+  <details id="space-add-activity" className="canva-create-shell"><summary>＋ Add activity</summary><div className="canva-create-body"><AddActivityForm data={data} space={space} user={user} update={update} note={note}/></div></details>
+  {canManage&&<p className="admin-note">Need to pause, archive, restore, or delete something? Use Rally Settings.</p>}
  </>
 }
+
 
 function SpaceHome({data,space,user,activities,complete,approve,sendBack,setScreen}:{data:AppData;space:Space;user:Member;activities:Activity[];complete:(a:Activity)=>void;approve:(a:Activity)=>void;sendBack:(a:Activity)=>void;setScreen:(s:Screen)=>void}){
  const sm=spaceMember(space,user.id)!
  const leaders=[...space.members].sort((a,b)=>b.weekly-a.weekly)
- const ready=activities
-  .filter(activity=>
-   activity.status==='open'&&
-   activity.isAvailableNow!==false&&
-   (activity.assignedTo.length===0||activity.assignedTo.includes(user.id))
-  )
-  .sort((a,b)=>recurrencePriority(a.recurrence)-recurrencePriority(b.recurrence))
-  .slice(0,4)
- const approvals=activities.filter(activity=>
-  Boolean(activity.approvalPending)&&activity.approverIds.includes(user.id)
- )
- const priorityTreat=data.treats.find(treat=>
-  treat.spaceId===space.id&&
-  treat.status==='locked'&&
-  treat.priorityFor.includes(user.id)
- )
- const activeGoal=data.goals
-  .filter(goal=>goal.spaceId===space.id&&goal.status!=='archived'&&goal.status!=='celebrated')
-  .sort((a,b)=>(b.progress/b.target)-(a.progress/a.target))[0]
+ const ready=activities.filter(activity=>activity.status==='open'&&activity.isAvailableNow!==false&&(activity.assignedTo.length===0||activity.assignedTo.includes(user.id))).sort((a,b)=>recurrencePriority(a.recurrence)-recurrencePriority(b.recurrence)).slice(0,3)
+ const approvals=activities.filter(activity=>Boolean(activity.approvalPending)&&activity.approverIds.includes(user.id))
+ const priorityTreat=data.treats.find(treat=>treat.spaceId===space.id&&treat.status==='locked'&&treat.priorityFor.includes(user.id))||data.treats.find(treat=>treat.spaceId===space.id&&treat.status==='locked')
+ const activeGoal=data.goals.filter(goal=>goal.spaceId===space.id&&goal.status!=='archived'&&goal.status!=='celebrated').sort((a,b)=>(b.progress/Math.max(1,b.target))-(a.progress/Math.max(1,a.target)))[0]
+ const weekStart=startOfCurrentWeek()
+ const weeklyWins=data.history.filter(h=>h.spaceId===space.id&&h.memberId===user.id&&h.kind==='earn'&&new Date(h.createdAt)>=weekStart)
+ const activeDays=new Set(weeklyWins.map(h=>localDateKey(new Date(h.createdAt)))).size
+ const heroPct=activeGoal?Math.min(100,Math.round(activeGoal.progress/Math.max(1,activeGoal.target)*100)):priorityTreat?Math.min(100,Math.round(sm.balance/Math.max(1,priorityTreat.points)*100)):Math.min(100,Math.round(activeDays/7*100))
+ const recentWins=data.history.filter(h=>h.spaceId===space.id&&h.kind==='earn').slice(0,3)
+ const todayLabel=new Intl.DateTimeFormat(undefined,{weekday:'long'}).format(new Date())
 
  return <>
-  <section className="space-overview-grid">
-   <article className="overview-stat-card primary-stat">
-    <small>Your points</small>
-    <strong>{sm.balance}</strong>
-    <span>{sm.weekly} earned this week</span>
-   </article>
-   <article className="overview-stat-card">
-    <small>Ready now</small>
-    <strong>{ready.length}</strong>
-    <span>{ready.length===1?'activity':'activities'} for you</span>
-   </article>
-   {space.poolEnabled&&
-    <article className="overview-stat-card">
-     <small>Shared pool</small>
-     <strong>{space.poolBalance}</strong>
-     <span>Rally points</span>
-    </article>
-   }
+  <section className="canva-page-head canva-home-head">
+   <div><p className="eyebrow">{space.name} · {todayLabel}</p><h1>Hey {user.name.split(' ')[0]}, you’re doing brilliantly.</h1><p className="supporting">A few small wins can make the whole day feel lighter.</p></div>
   </section>
 
-  {approvals.length>0&&
-   <section className="attention-panel">
-    <div className="section-title">
-     <div><p className="eyebrow">Needs your attention</p><h2>Review a completion</h2></div>
-    </div>
-    {approvals.slice(0,2).map(activity=>
-     <ActivityCard
-      key={activity.id}
-      a={activity}
-      data={data}
-      user={user}
-      complete={complete}
-      approve={approve}
-      sendBack={sendBack}
-     />
-    )}
-   </section>
-  }
+  <div className="canva-grid-main">
+   <div className="canva-stack">
+    <section className="card hero-card canva-card">
+     <MomentumRoute/>
+     <div className="hero-content">
+      <p className="eyebrow">This week’s momentum</p>
+      <div className="summary-grid">
+       <div><div className="point-number">{sm.weekly.toLocaleString()}</div><p className="point-caption">points collected this week</p></div>
+       <div className="progress-ring" style={{'--progress':heroPct} as any}><span>{heroPct}%</span></div>
+      </div>
+      <div className="progress-track"><div className="progress-fill" style={{width:`${heroPct}%`}}/></div>
+      <p className="supporting hero-progress-copy">{activeGoal?`${activeGoal.progress.toLocaleString()} of ${activeGoal.target.toLocaleString()} points toward ${activeGoal.name}`:priorityTreat?`${sm.balance.toLocaleString()} of ${priorityTreat.points.toLocaleString()} points toward ${priorityTreat.name}`:`${activeDays} of 7 days active this week`}</p>
+      <div className="summary-stats"><div className="summary-stat"><strong>{activeDays} {activeDays===1?'day':'days'}</strong><span>active this week</span></div><div className="summary-stat"><strong>{weeklyWins.length} {weeklyWins.length===1?'win':'wins'}</strong><span>this week</span></div><div className="summary-stat"><strong>{roleFor(space,user.id)||'Member'}</strong><span>your role</span></div></div>
+     </div>
+    </section>
 
-  <section className="panel">
-   <div className="section-title">
-    <div><p className="eyebrow">Up next</p><h2>{ready.length?'Ready for you':'All caught up 🎉'}</h2></div>
-    <button onClick={()=>setScreen('activities')}>See activities →</button>
+    {approvals.length>0&&<section className="card attention card-pad canva-card"><div className="section-title"><h2>Needs your attention</h2><span className="pill waiting">{approvals.length} waiting</span></div>{approvals.slice(0,3).map(activity=><div className="list-row" key={activity.id}><CanvaStateArt state="waiting" icon={activity.icon}/><div className="row-text"><strong>{activity.name}</strong><span>{activity.approvalPendingBy?memberName(data,activity.approvalPendingBy):'Someone'} submitted this · {activity.points} points</span></div><button className="primary-button" onClick={()=>setScreen('activities')}>Review</button></div>)}</section>}
+
+    <section className="card card-pad canva-card"><div className="section-title"><h2>Up next</h2><button className="link-button" onClick={()=>setScreen('activities')}>View all</button></div>{ready.length?ready.map(activity=><div className="list-row" key={activity.id}><CanvaStateArt state="ready" icon={activity.icon}/><div className="row-text"><strong>{activity.name}</strong><span>{activity.recurrenceLabel||recurrenceLabel(activity.recurrence)}</span></div><button className="secondary-button compact-complete" onClick={()=>complete(activity)}>Complete</button><span className="token">+{activity.points}</span></div>):<div className="empty-state"><div className="mascot-wrap"><RallySparkMascot mood="cheer"/></div><strong>You’re all caught up</strong><p>Enjoy the extra breathing room.</p></div>}</section>
    </div>
-   {ready.length
-    ? ready.map(activity=>
-       <ActivityCard
-        key={activity.id}
-        a={activity}
-        data={data}
-        user={user}
-        complete={complete}
-        approve={approve}
-        sendBack={sendBack}
-       />
-      )
-    : <div className="empty friendly-empty">Nothing else is waiting on you in this Rally.</div>
-   }
-  </section>
 
-  {space.members.length>1&&space.weeklyLeaderboard&&
-   <section className="panel compact-leaderboard">
-    <div className="section-title">
-     <div><p className="eyebrow">Weekly race</p><h2>Leaderboard 🏁</h2></div>
-     <button onClick={()=>setScreen('leaderboard')}>Full leaderboard →</button>
-    </div>
-    {leaders.slice(0,4).map((member,index)=>
-     <div className="compact-leader-row" key={member.memberId}>
-      <span>{index===0?'👑':`#${index+1}`}</span>
-      <Avatar member={data.members.find(item=>item.id===member.memberId)!}/>
-      <strong>{memberName(data,member.memberId)}{member.memberId===user.id?' · You':''}</strong>
-      <b>{member.weekly} pts</b>
-     </div>
-    )}
-   </section>
-  }
+   <aside className="canva-stack">
+    {priorityTreat&&<section className="card card-pad treat-card canva-card"><DestinationScene kind="treat"/><div className="section-title"><span className={`space-badge ${space.type}`}>{space.icon}</span><PennantBadge>Next reward</PennantBadge></div><h2>{priorityTreat.name}</h2><p className="supporting">Keep going—just a few more points unlocks a Treat you chose.</p><div className="progress-track motivation-track"><div className="progress-fill treat-progress-fill" style={{width:`${Math.min(100,sm.balance/Math.max(1,priorityTreat.points)*100)}%`}}/></div><p className="supporting motivation-progress">{Math.max(0,priorityTreat.points-sm.balance).toLocaleString()} points to go</p></section>}
 
-  <section className="overview-motivation-grid">
-   {activeGoal&&
-    <button className="overview-motivation-card goal-card" onClick={()=>setScreen('goals')}>
-     <span>{activeGoal.icon}</span>
-     <div>
-      <p className="eyebrow">Goal</p>
-      <h3>{activeGoal.name}</h3>
-      <Progress value={activeGoal.progress} max={activeGoal.target}/>
-      <small>{Math.max(0,activeGoal.target-activeGoal.progress)} points to go</small>
-     </div>
-     <b>→</b>
-    </button>
-   }
+    {!priorityTreat&&activeGoal&&<section className="card card-pad goal-motivation-card canva-card"><DestinationScene kind="goal"/><div className="section-title"><span className={`space-badge ${space.type}`}>{space.icon}</span><PennantBadge>Active goal</PennantBadge></div><h2>{activeGoal.name}</h2><p className="supporting">Every selected win can move this Goal forward.</p><div className="progress-track motivation-track"><div className="progress-fill" style={{width:`${heroPct}%`}}/></div><p className="supporting motivation-progress">{Math.max(0,activeGoal.target-activeGoal.progress).toLocaleString()} points to go</p></section>}
 
-   {priorityTreat&&
-    <button className="overview-motivation-card treat-card" onClick={()=>setScreen('treats')}>
-     <span>{priorityTreat.icon}</span>
-     <div>
-      <p className="eyebrow">Top treat</p>
-      <h3>{priorityTreat.name}</h3>
-      <Progress value={sm.balance} max={priorityTreat.points}/>
-      <small>{Math.max(0,priorityTreat.points-sm.balance)} points away</small>
-     </div>
-     <b>→</b>
-    </button>
-   }
-  </section>
+    {space.members.length>1&&space.weeklyLeaderboard&&<section className="card card-pad canva-card"><div className="section-title"><h2>Leaderboard</h2><button className="link-button" onClick={()=>setScreen('leaderboard')}>This week</button></div>{leaders.slice(0,3).map((member,index)=><div className="list-row" key={member.memberId}><span className="rank-number">{index+1}</span><Avatar member={data.members.find(item=>item.id===member.memberId)!}/><div className="row-text"><strong>{memberName(data,member.memberId)}{member.memberId===user.id?' (You)':''}</strong><span>{member.weekly.toLocaleString()} points</span></div>{index<3?<PennantBadge tone={index===0?'sun':index===1?'coral':'mint'}>#{index+1}</PennantBadge>:null}</div>)}</section>}
 
-  {!activeGoal&&!priorityTreat&&
-   <section className="panel gentle-prompt">
-    <div>
-     <p className="eyebrow">Make it motivating</p>
-     <h2>Give these wins somewhere to go.</h2>
-     <p>Add a goal or a treat when you want a little extra motivation.</p>
-    </div>
-    <div>
-     <button className="secondary" onClick={()=>setScreen('goals')}>Add a goal</button>
-     <button className="secondary" onClick={()=>setScreen('treats')}>Add a treat</button>
-    </div>
-   </section>
-  }
+    <section className="card card-pad win-card canva-card"><div className="section-title"><h2>Recent wins</h2><RallySparkMascot mood="cheer"/></div>{recentWins.length?recentWins.map(h=><div className="list-row" key={h.id}><CanvaStateArt state="done"/><div className="row-text"><strong>{h.title}</strong><span>{memberName(data,h.memberId)} · {formatTimestamp(h.createdAt)}</span></div><span className="token">+{h.points}</span></div>):<div className="empty-state compact-empty"><strong>Your wins will show up here.</strong></div>}</section>
+   </aside>
+  </div>
  </>
 }
 
+
 function Leaderboard({data,space,user}:{data:AppData;space:Space;user:Member}){
- const leaders=[...space.members].sort((a,b)=>b.weekly-a.weekly);const max=Math.max(1,...leaders.map(x=>x.weekly));const me=leaders.find(x=>x.memberId===user.id)!;const leader=leaders[0];const catchup=Math.max(0,leader.weekly-me.weekly+1);const suggestion=data.activities.filter(a=>a.spaceId===space.id&&a.status==='open'&&a.isAvailableNow!==false&&a.assignedTo.includes(user.id)).sort((a,b)=>b.points-a.points)[0]
- return <><section className="race-hero"><div><p>🏁 WEEKLY RACE</p><h1>{leader.memberId===user.id?'You’re in first!':'Catch the leader'}</h1><span>{leader.memberId===user.id?`You’re ${leader.weekly-(leaders[1]?.weekly||0)} points ahead.`:`You need ${catchup} more points to take #1.`}</span></div><span className="trophy">🏆</span></section><section className="leaderboard">{leaders.map((m,i)=><article key={m.memberId} className={i===0?'winner':''}><span className="rank">{i===0?'👑':`#${i+1}`}</span><Avatar member={data.members.find(x=>x.id===m.memberId)!}/><div className="who"><strong>{memberName(data,m.memberId)}{m.memberId===user.id?' · You':''}</strong><small>{data.members.find(x=>x.id===m.memberId)?.tier} · {m.lifetime} space lifetime</small></div><div className="track"><i style={{width:`${Math.max(7,m.weekly/max*100)}%`}}/></div><b>{m.weekly} pts</b></article>)}</section>{leader.memberId!==user.id&&suggestion&&<section className="catchup"><span>⚡</span><div><strong>Fastest way to catch up</strong><p>Complete <b>{suggestion.name}</b> for +{suggestion.points} points.</p></div><button>Let’s go</button></section>}</>
+ const [period,setPeriod]=useState<'week'|'all'>('week')
+ const leaders=[...space.members].sort((a,b)=>period==='week'?b.weekly-a.weekly:b.lifetime-a.lifetime)
+ const pointsFor=(m:SpaceMember)=>period==='week'?m.weekly:m.lifetime
+ if(space.members.length<=1) return <section className="empty-state canva-full-empty"><div className="mascot-wrap"><RallySparkMascot mood="happy"/></div><strong>Leaderboard</strong><p>Invite someone when you want a little friendly competition.</p></section>
+ return <>
+  <section className="canva-page-head"><div><p className="eyebrow">Every effort counts</p><h1>Leaderboard</h1><p className="supporting">A friendly snapshot of the wins your crew is making.</p></div></section>
+  <div className="segmented canva-leader-filter"><button className={period==='week'?'active':''} onClick={()=>setPeriod('week')}>This Week</button><button className={period==='all'?'active':''} onClick={()=>setPeriod('all')}>All Time</button></div>
+  <section className="card card-pad canva-card canva-leader-list">
+   {leaders.map((m,index)=>{
+    const member=data.members.find(x=>x.id===m.memberId)!
+    return <div className={`list-row ${m.memberId===user.id?'is-me':''}`} key={m.memberId}>
+     <Avatar member={member}/>
+     <div className="row-text"><strong>{memberName(data,m.memberId)}{m.memberId===user.id?' (You)':''}</strong><span>{period==='week'?'This week':'All-time progress'}</span></div>
+     <PennantBadge tone={index===0?'sun':index===1?'coral':'mint'}>#{index+1}</PennantBadge>
+     <span className="token">{pointsFor(m).toLocaleString()}</span>
+    </div>
+   })}
+  </section>
+ </>
 }
+
 
 function Stats({data,space}:{data:AppData;space:Space}){
  const hist=data.history.filter(h=>h.spaceId===space.id&&h.kind==='earn');const cats=[...new Set(data.activities.filter(a=>a.spaceId===space.id).map(a=>a.category))]
@@ -3921,65 +3820,57 @@ function Goals({data,space,user,update,note}:{data:AppData;space:Space;user:Memb
  }
 
  return <>
-  <section className="page-heading simple-heading rally-page-heading">
-   <div>
-    <p className="eyebrow">Goals</p>
-    <h1>Build toward something that matters.</h1>
-    <p>Activities that contribute to goals move these forward automatically.</p>
-   </div>
+  <section className="canva-page-head">
+   <div><p className="eyebrow">A shared direction</p><h1>{space.members.length>1?'Goals':'Goals'}</h1><p className="supporting">Keep the big picture encouraging and easy to follow.</p></div>
   </section>
 
   {active.length===0
-   ? <section className="panel empty-goal-state">
-      <span>🎯</span>
-      <div><h2>Nothing you’re building toward yet</h2><p>Add a goal when you want your everyday wins to add up to something bigger.</p></div>
-     </section>
-   : <section className="cards rally9-goal-grid">
-      {active.map(g=>
-       <article className={`goal rally9-goal ${g.status}`} key={g.id}>
-        <span>{g.icon}</span>
-        <div className="goal-copy">
-         <p className="eyebrow">{g.status==='reached'?'You did it 🎉':'In progress'}</p>
-         <h2>{g.name}</h2>
-         <Progress value={g.progress} max={g.target}/>
-         <div className="goal-progress-copy">
-          <b>{g.progress.toLocaleString()} / {g.target.toLocaleString()}</b>
-          <small>{Math.max(0,g.target-g.progress).toLocaleString()} points to go</small>
-         </div>
-         {g.status==='reached'&&
-          <button className="primary" onClick={()=>celebrate(g)}>Celebrate this goal 🎉</button>
-         }
-        </div>
-       </article>
-      )}
-     </section>
+   ? <section className="empty-state canva-full-empty"><div className="mascot-wrap"><RallySparkMascot mood="happy"/></div><strong>What are you working toward?</strong><p>Create a Goal and let everyday wins move you closer.</p></section>
+   : <>
+      <div className="canva-grid-main canva-goals-layout">
+       <div className="canva-stack">
+        {active.map((g,index)=>{
+         const pct=Math.min(100,Math.round((g.progress/Math.max(1,g.target))*100))
+         return <section className={`card card-pad canva-card canva-goal-card ${g.status}`} key={g.id}>
+          {index===0&&<DestinationScene kind="goal"/>}
+          <div className="section-title">
+           <div className="goal-title-lockup"><span className={`space-badge ${space.type}`}>{g.icon}</span><div><h2>{g.name}</h2><p className="supporting">{space.members.length>1?'Shared Rally goal':'Personal goal'}</p></div></div>
+           <PennantBadge>{g.status==='reached'?'Reached':'Active goal'}</PennantBadge>
+          </div>
+          <p className="supporting">{g.status==='reached'?'You reached this Goal — your Rally points are still yours.':'Selected activities add their points to this progress.'}</p>
+          <div className="goal-progress-layout">
+           <div className="progress-ring" style={{'--progress':pct} as any}><span>{pct}%</span></div>
+           <div className="goal-progress-main"><div className="progress-track"><div className="progress-fill" style={{width:`${pct}%`}}/></div><p className="supporting">{g.progress.toLocaleString()} of {g.target.toLocaleString()} points collected</p></div>
+          </div>
+          {g.status==='reached'&&<button className="primary-button goal-celebrate" onClick={()=>celebrate(g)}>Celebrate goal 🎉</button>}
+         </section>
+        })}
+       </div>
+
+       <aside className="card card-pad canva-card canva-goal-tip">
+        <div className="mascot-wrap goal-tip-mascot"><RallySparkMascot mood="happy"/></div>
+        <h2>A little goes a long way</h2>
+        <p className="supporting">Each activity can help one Goal, several Goals, all of them, or none. Reaching a Goal tracks your progress — it never spends your points.</p>
+       </aside>
+      </div>
+     </>
   }
 
-  <details className="panel create-activity-shell goal-create-shell">
+  <details className="canva-create-shell" open={active.length===0}>
    <summary>＋ New goal</summary>
-   <form className="form rally9-create-form" onSubmit={add}>
-    <div className="two">
-     <label>What are you working toward?<input name="name" required placeholder="Weekend getaway"/></label>
-     <label>Icon<input name="icon" placeholder="🌴"/></label>
-    </div>
-    <label>
-     Target
-     <select name="target" defaultValue="1000">
-      {[250,500,750,1000,1500,2000,2500,3000,5000].map(p=><option key={p} value={p}>{p.toLocaleString()} points</option>)}
-     </select>
-    </label>
-    <button className="primary">Create goal</button>
-   </form>
+   <div className="canva-create-body">
+    <form className="form rally9-create-form" onSubmit={add}>
+     <div className="two"><label>What are you working toward?<input name="name" required placeholder="Weekend getaway"/></label><label>Icon<input name="icon" placeholder="🌴"/></label></div>
+     <label>Target<select name="target" defaultValue="1000">{[250,500,750,1000,1500,2000,2500,3000,5000].map(p=><option key={p} value={p}>{p.toLocaleString()} points</option>)}</select></label>
+     <button className="primary-button">Create goal</button>
+    </form>
+   </div>
   </details>
 
-  {celebrated.length>0&&
-   <section className="panel celebration-shelf">
-    <div className="section-title"><div><p className="eyebrow">Celebrated</p><h2>Goals you reached</h2></div></div>
-    {celebrated.map(g=><div className="history-row" key={g.id}><span>{g.icon}</span><div><strong>{g.name}</strong><small>{g.target.toLocaleString()} point goal</small></div><b>✓</b></div>)}
-   </section>
-  }
+  {celebrated.length>0&&<section className="card card-pad canva-card canva-history-shelf"><div className="section-title"><div><p className="eyebrow">Completed Goals</p><h2>Progress worth celebrating</h2></div></div>{celebrated.map(g=><div className="list-row" key={g.id}><CanvaStateArt state="done" icon={g.icon}/><div className="row-text"><strong>{g.name}</strong><span>{g.target.toLocaleString()} point goal</span></div><PennantBadge tone="mint">Done</PennantBadge></div>)}</section>}
  </>
 }
+
 
 function Treats({data,space,user,update,note}:{data:AppData;space:Space;user:Member;update:(d:AppData)=>void;note:(s:string)=>void}){
  const treats=data.treats.filter(t=>t.spaceId===space.id)
@@ -3993,7 +3884,7 @@ function Treats({data,space,user,update,note}:{data:AppData;space:Space;user:Mem
    return
   }
 
-  if(!window.confirm(`Get "${t.name}" for ${t.points} points?`)) return
+  if(!window.confirm(`Use ${t.points} points for “${t.name}”? Your lifetime progress will stay the same.`)) return
 
   const obtainedAt=new Date().toISOString()
 
@@ -4115,7 +4006,7 @@ function Treats({data,space,user,update,note}:{data:AppData;space:Space;user:Mem
    ]
   })
 
-  note('Treat obtained! 🎁')
+  note('Treat unlocked! Enjoy it 🎉')
  }
 
  const priority=async(t:Treat)=>{
@@ -4264,108 +4155,64 @@ function Treats({data,space,user,update,note}:{data:AppData;space:Space;user:Mem
   note('Treat added.')
  }
 
+
+
  return <>
-  <section className="page-heading simple-heading rally-page-heading treat-page-heading">
-   <div>
-    <p className="eyebrow">Treat Yourself 🎁</p>
-    <h1>Give your progress something fun to unlock.</h1>
-    <p>Available points can be spent here without changing your lifetime progress.</p>
-   </div>
-   <div className="page-balance-badge">
-    <strong>{sm.balance}</strong><span>available points</span>
-   </div>
+  <section className="canva-page-head">
+   <div><p className="eyebrow">Celebrate the effort</p><h1>Treats</h1><p className="supporting">Lovely reasons to keep the good momentum moving.</p></div>
+  </section>
+
+  <section className="canva-treat-points-strip">
+   <div><RallySparkMascot mood="cheer"/><span><strong>{sm.balance.toLocaleString()} points</strong><small>ready to use when you choose</small></span></div>
+   <p>Rally points are for motivation, not money. Treats are rewards you choose for yourself or your crew.</p>
   </section>
 
   {locked.length===0
-   ? <section className="panel empty-goal-state"><span>🎁</span><div><h2>No treats yet</h2><p>Add something small or big that would feel worth working toward.</p></div></section>
-   : <section className="cards rally9-treat-grid">
-      {[...locked]
-       .sort((a,b)=>Number(b.priorityFor.includes(user.id))-Number(a.priorityFor.includes(user.id)))
-       .map(t=>{
-        const isPriority=t.priorityFor.includes(user.id)
-        const canAfford=sm.balance>=t.points
-        return <article className={`treat rally9-treat ${isPriority?'priority':''}`} key={t.id}>
-         <span className="huge">{t.icon}</span>
-         {isPriority&&<em>⭐ Top treat</em>}
-         <h2>{t.name}</h2>
-         {t.description&&<p>{t.description}</p>}
-         {space.members.length>1&&t.assignedTo.length>0&&
-          <small>For {t.assignedTo.map(id=>memberName(data,id)).join(', ')}</small>
-         }
-         <Progress value={sm.balance} max={t.points}/>
-         <div className="treat-progress-copy">
-          <b>{t.points} pts</b>
-          <small>{canAfford?'Ready when you are 🎉':`${t.points-sm.balance} points away`}</small>
-         </div>
-         <div className="treat-actions">
-          {!isPriority&&<button className="secondary" onClick={()=>priority(t)}>☆ Make top treat</button>}
-          <button className="primary" disabled={!canAfford} onClick={()=>obtain(t)}>
-           {canAfford?'Get this treat 🎉':'Keep going'}
-          </button>
-         </div>
-        </article>
-       })}
+   ? <section className="empty-state canva-full-empty"><div className="mascot-wrap"><RallySparkMascot mood="happy"/></div><strong>Give yourself something worth working toward.</strong><p>Add a small reward or a big one — whatever actually motivates you.</p></section>
+   : <section className="activity-grid canva-treat-grid">
+      {[...locked].sort((a,b)=>Number(b.priorityFor.includes(user.id))-Number(a.priorityFor.includes(user.id))).map((t,index)=>{
+       const isPriority=t.priorityFor.includes(user.id)
+       const canAfford=sm.balance>=t.points
+       const pct=Math.min(100,Math.round(sm.balance/Math.max(1,t.points)*100))
+       return <article className={`card card-pad canva-card canva-treat-card ${index%2===0?'mint':'pink'} ${isPriority?'priority':''}`} key={t.id}>
+        <DestinationScene kind={index%2===0?'treat':'movie'}/>
+        <div className="section-title">
+         <div className="goal-title-lockup"><span className="space-badge household">{t.icon}</span><div><h2>{t.name}</h2>{isPriority&&<small>Top Treat</small>}</div></div>
+         <span className="token">{t.points.toLocaleString()}</span>
+        </div>
+        <p className="supporting">{t.description||'A reward to celebrate your progress.'}</p>
+        <div className="progress-track treat-card-progress"><div className="progress-fill" style={{width:`${pct}%`,background:index%2===0?'#25815e':'#de705d'}}/></div>
+        <p className="supporting treat-progress-copy">{canAfford?'You earned this 🎉':`${(t.points-sm.balance).toLocaleString()} points to go`}</p>
+        {space.members.length>1&&t.assignedTo.length>0&&<p className="tiny-progress">For {t.assignedTo.map(id=>memberName(data,id)).join(', ')}</p>}
+        <div className="canva-treat-actions">
+         {!isPriority&&<button className="secondary-button" onClick={()=>priority(t)}>☆ Make top Treat</button>}
+         {canAfford?<button className="primary-button" onClick={()=>obtain(t)}>Use Treat</button>:<span className="pill waiting">Keep going</span>}
+        </div>
+       </article>
+      })}
      </section>
   }
 
-  <details className="panel create-activity-shell treat-create-shell">
+  <details className="canva-create-shell" open={locked.length===0}>
    <summary>＋ New treat</summary>
-   <form className="form rally9-create-form" onSubmit={add}>
-    <div className="two">
-     <label>Treat name<input name="name" required placeholder="Dinner out"/></label>
-     <label>Icon<input name="icon" placeholder="🍝"/></label>
-    </div>
-    <label>Description<textarea name="description" placeholder="A fun thing to work toward."/></label>
-    <label>
-     Unlock at
-     <select name="points" defaultValue="500">
-      {[100,150,200,250,300,400,500,750,1000,1500,2000].map(p=><option key={p} value={p}>{p.toLocaleString()} points</option>)}
-     </select>
-    </label>
-    {space.members.length>1&&
-     <fieldset>
-      <legend>Who is it for?</legend>
-      <div className="people-options">
-       {space.members.map(member=>
-        <label className="check" key={member.memberId}>
-         <input type="checkbox" name="assignedTo" value={member.memberId} defaultChecked={member.memberId===user.id}/>
-         {member.memberId===user.id?'Me':memberName(data,member.memberId)}
-        </label>
-       )}
-      </div>
-     </fieldset>
-    }
-    <label className="check"><input type="checkbox" name="priority"/> Make this my top treat</label>
-    <button className="primary">Create treat</button>
-   </form>
+   <div className="canva-create-body">
+    <form className="form rally9-create-form" onSubmit={add}>
+     <div className="two"><label>Treat name<input name="name" required placeholder="Dinner out"/></label><label>Icon<input name="icon" placeholder="🍝"/></label></div>
+     <label>Description<textarea name="description" placeholder="A fun thing to work toward."/></label>
+     <label>Unlock at<select name="points" defaultValue="500">{[100,150,200,250,300,400,500,750,1000,1500,2000].map(p=><option key={p} value={p}>{p.toLocaleString()} points</option>)}</select></label>
+     {space.members.length>1&&<fieldset><legend>Who is it for?</legend><div className="people-options">{space.members.map(member=><label className="check" key={member.memberId}><input type="checkbox" name="assignedTo" value={member.memberId} defaultChecked={member.memberId===user.id}/>{member.memberId===user.id?'Me':memberName(data,member.memberId)}</label>)}</div></fieldset>}
+     <label className="check"><input type="checkbox" name="priority"/> Make this my top treat</label>
+     <button className="primary-button">Create treat</button>
+    </form>
+   </div>
   </details>
 
-  {(data.rewardIdeas||[]).length>0&&
-   <details className="panel inspiration-panel">
-    <summary>Need inspiration?</summary>
-    <div className="cards">
-     {(data.rewardIdeas||[]).slice(0,6).map(idea=>
-      <article className="treat inspiration-card" key={idea.id}>
-       <p className="eyebrow">{idea.category}</p>
-       <h2>{idea.title}</h2>
-       <p>{idea.description}</p>
-       {idea.suggestedPoints&&<small>Suggested: {idea.suggestedPoints} points</small>}
-       <button className="secondary" onClick={()=>window.open(idea.destinationUrl,'_blank')}>Explore idea ↗</button>
-      </article>
-     )}
-    </div>
-   </details>
-  }
+  {(data.rewardIdeas||[]).length>0&&<details className="canva-create-shell inspiration-panel"><summary>Need inspiration?</summary><div className="cards canva-inspiration-grid">{(data.rewardIdeas||[]).slice(0,6).map(idea=><article className="card card-pad canva-card" key={idea.id}><p className="eyebrow">{idea.category}</p><h2>{idea.title}</h2><p className="supporting">{idea.description}</p>{idea.suggestedPoints&&<span className="token">{idea.suggestedPoints}</span>}<button className="secondary-button" onClick={()=>window.open(idea.destinationUrl,'_blank')}>Explore idea ↗</button></article>)}</div></details>}
 
-  {obtained.length>0&&
-   <section className="obtained celebration-shelf">
-    <h2>Celebration shelf 🎉</h2>
-    {obtained.map(t=><article key={t.id}><span>{t.icon}</span><div><strong>{t.name}</strong><small>{formatTimestamp(t.obtainedAt)}</small></div><b>✓</b></article>)}
-   </section>
-  }
+  {obtained.length>0&&<section className="card card-pad canva-card canva-history-shelf"><div className="section-title"><div><p className="eyebrow">Past Treats</p><h2>Rewards you’ve already enjoyed 🎉</h2></div></div>{obtained.map(t=><div className="list-row" key={t.id}><CanvaStateArt state="done" icon={t.icon}/><div className="row-text"><strong>{t.name}</strong><span>{formatTimestamp(t.obtainedAt)}</span></div><PennantBadge tone="mint">Used</PennantBadge></div>)}</section>}
  </>
-
 }
+
 
 function Members({data,space,user,update,note}:{data:AppData;space:Space;user:Member;update:(d:AppData)=>void;note:(s:string)=>void}){
  const role=roleFor(space,user.id)
@@ -5135,7 +4982,7 @@ function Profile({data,user,spaces,update,note,setSpaceId,setScreen,logout}:{dat
   </section>
 
   <section className="profile-stat-grid rally9-profile-stats">
-   <article><small>Available</small><strong>{totalBalance}</strong><span>across Rallies</span></article>
+   <article><small>Points to use</small><strong>{totalBalance}</strong><span>across your Rallies</span></article>
    <article><small>This week</small><strong>{totalWeekly}</strong><span>points earned</span></article>
    <article><small>Your wins</small><strong>{totalCompleted}</strong><span>completed activities</span></article>
    <article><small>Rallies</small><strong>{spaces.length}</strong><span>spaces you’re in</span></article>
@@ -5146,6 +4993,7 @@ function Profile({data,user,spaces,update,note,setSpaceId,setScreen,logout}:{dat
     <div><p className="eyebrow">Settings</p><h2>Your account</h2></div>
    </div>
    <div className="profile-menu-list">
+    <button onClick={()=>setScreen('how-it-works')}><span>✦</span><div><strong>How Rally works</strong><small>Points, Goals, Treats, activities, and Rally Spaces explained</small></div><b>→</b></button>
     <button onClick={()=>setScreen('account-settings')}><span>⚙️</span><div><strong>Account & profile</strong><small>Name, defaults, privacy, and competition preferences</small></div><b>→</b></button>
     <button onClick={()=>setScreen('notifications')}><span>🔔</span><div><strong>Notifications</strong><small>What Rally tells you about and when</small></div><b>→</b></button>
     <button onClick={()=>setScreen('friends')}><span>👥</span><div><strong>Friends</strong><small>Requests and connected friends</small></div><b>→</b></button>
@@ -5192,6 +5040,42 @@ function Profile({data,user,spaces,update,note,setSpaceId,setScreen,logout}:{dat
   }
 
   <button className="profile-logout" onClick={()=>logout()}>Log out</button>
+ </>
+}
+
+function HowRallyWorks({setScreen}:{setScreen:(s:Screen)=>void}){
+ return <>
+  <section className="how-rally-hero">
+   <button className="how-rally-back" onClick={()=>setScreen('profile')}>← Profile</button>
+   <span className="how-rally-hero-mark">✦</span>
+   <p className="eyebrow light">How Rally works</p>
+   <h1>Turn everyday effort into momentum.</h1>
+   <p>Rally is a motivation tool for individuals, families, friends, and teams. Add what you want to get done, earn points when you do it, and use that progress to keep yourself moving.</p>
+  </section>
+
+  <section className="rally-explainer-grid">
+   <article><span>1</span><b>✓</b><h2>Add what you want to get done</h2><p>Activities can be chores, habits, routines, projects, or anything else you want a little extra motivation to finish.</p></article>
+   <article><span>2</span><b>+20</b><h2>Turn completions into points</h2><p>Points make effort visible. Bigger or harder activities can be worth more, and every valid completion adds to your progress.</p></article>
+   <article><span>3</span><b>🎯</b><h2>Build toward Goals</h2><p>Goals give your points somewhere meaningful to build. Points move selected Goals forward, but reaching a Goal never uses those points up.</p></article>
+   <article><span>4</span><b>🎁</b><h2>Give yourself a Treat</h2><p>Treats are rewards you choose because they motivate you. When you decide to use one, its point cost comes out of your points to use — not your lifetime progress.</p></article>
+   <article><span>5</span><b>👥</b><h2>Rally together</h2><p>Create spaces for yourself, your household, friends, or a team. Encourage each other, work toward shared progress, or add friendly competition when it helps.</p></article>
+  </section>
+
+  <section className="goal-treat-compare">
+   <article className="goal-side">
+    <span>🎯</span>
+    <div><p className="eyebrow">Goal</p><h2>Track progress</h2><p>“We want to build 1,000 points of healthy habits.”</p><strong>Points move the Goal forward and stay yours.</strong></div>
+   </article>
+   <article className="treat-side">
+    <span>🎁</span>
+    <div><p className="eyebrow">Treat</p><h2>Celebrate progress</h2><p>“At 500 points, I’m treating myself to dinner out.”</p><strong>You choose when to use the Treat and its points.</strong></div>
+   </article>
+  </section>
+
+  <section className="panel rally-points-note">
+   <span>✦</span>
+   <div><h2>Rally points are for motivation.</h2><p>They have no cash or monetary value. They simply help make effort visible, make progress feel rewarding, and give you something concrete to work toward.</p></div>
+  </section>
  </>
 }
 
@@ -5259,8 +5143,8 @@ function AccountSettings({data,user,update,note}:{data:AppData;user:Member;updat
   <section className="panel settings-section">
    <div className="section-title">
     <div>
-     <p className="eyebrow">Competition</p>
-     <h2>Default point experience</h2>
+     <p className="eyebrow">Motivation style</p>
+     <h2>How do you like to Rally?</h2>
     </div>
    </div>
 
@@ -5271,14 +5155,13 @@ function AccountSettings({data,user,update,note}:{data:AppData;user:Member;updat
       key={option}
       onClick={()=>savePrefs({...prefs,competition:option})}
      >
-      {option}
+      {option==='Competitive'?'🏆 Compete':option==='Collaborative'?'🤝 Together':'✨ Just me'}
      </button>
     )}
    </div>
 
    <p className="settings-explainer">
-    Individual Rally Spaces can still have their own leaderboard rules.
-    This is your preferred account experience.
+    This preference helps Rally emphasize the kind of motivation you like. Individual Rally Spaces can still use their own leaderboard settings.
    </p>
   </section>
 
