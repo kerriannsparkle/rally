@@ -2943,3 +2943,51 @@ legend{
     font-size:.62rem;
   }
 }
+
+/* Rally 9 — explicit Rally invitation flow */
+.space-invitation-card{
+ display:grid;
+ grid-template-columns:auto minmax(0,1fr) auto;
+ gap:16px;
+ align-items:center;
+ padding:16px;
+ margin-top:12px;
+ border:1px solid rgba(74,57,112,.13);
+ border-radius:18px;
+ background:rgba(255,255,255,.84);
+ box-shadow:0 8px 24px rgba(54,43,86,.06);
+}
+.space-invitation-icon{
+ width:52px;
+ height:52px;
+ display:grid;
+ place-items:center;
+ border-radius:16px;
+ background:rgba(112,90,190,.10);
+ font-size:26px;
+}
+.space-invitation-copy{min-width:0}
+.space-invitation-copy .eyebrow{margin:0 0 3px}
+.space-invitation-copy h3{margin:0 0 4px;font-size:18px}
+.space-invitation-copy p{margin:0 0 5px}
+.space-invitation-copy small{opacity:.68}
+.space-invitation-actions{
+ display:flex;
+ align-items:center;
+ justify-content:flex-end;
+ gap:8px;
+ flex-wrap:wrap;
+}
+.notification-invitations{margin-bottom:18px}
+
+@media (max-width:720px){
+ .space-invitation-card{
+  grid-template-columns:auto 1fr;
+  align-items:start;
+ }
+ .space-invitation-actions{
+  grid-column:1/-1;
+  width:100%;
+ }
+ .space-invitation-actions button{flex:1}
+}

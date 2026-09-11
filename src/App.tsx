@@ -36,11 +36,12 @@ type AccountPreferences={
 }
 type SubscriptionInfo={plan:'free'|'plus'|'pro';status:string;currentPeriodEnd?:string}
 type RewardIdea={id:string;title:string;description:string;destinationUrl:string;category:string;suggestedPoints?:number;featured:boolean}
+type SpaceInvitation={id:string;spaceId:string;spaceName:string;spaceIcon:string;role:'member'|'approver'|'admin';invitedByName:string;expiresAt:string;createdAt:string}
 type AppData={
  currentUserId:string;members:Member[];spaces:Space[];activities:Activity[];treats:Treat[];goals:Goal[];
  notifications:Notification[];friends:Friend[];challenges:CommunityChallenge[];history:History[];
  notificationPrefs:Record<string,NotificationPref>;accountPrefs?:AccountPreferences;
- subscription?:SubscriptionInfo;rewardIdeas?:RewardIdea[]
+ subscription?:SubscriptionInfo;rewardIdeas?:RewardIdea[];pendingInvites?:SpaceInvitation[]
 }
 
 const BRAND={name:'Rally',logo:'✦',tagline:'Make progress feel good.'}
@@ -98,6 +99,7 @@ const seed:AppData={
  history:[
   {id:'hh1',spaceId:'home',memberId:'kerriann',activityId:'h3',title:'Feed Harley dinner',detail:'KerriAnn completed this activity',points:5,kind:'earn',createdAt:'Today'}
  ],
+ pendingInvites:[],
  notificationPrefs:{
   kerriann:{leaderboard:true,approvals:true,milestones:true,tiers:true,daily:true,community:true},
   zak:{leaderboard:true,approvals:true,milestones:true,tiers:true,daily:false,community:true}
@@ -274,6 +276,7 @@ const [authenticated,setAuthenticated]=useState(false)
 const [sessionChecked,setSessionChecked]=useState(false)
 const [authUser,setAuthUser]=useState<User|null>(null)
 const [accountLoaded,setAccountLoaded]=useState(false)
+const [accountRefresh,setAccountRefresh]=useState(0)
 
 useEffect(()=>{
  supabase.auth.getUser().then(({data,error})=>{
@@ -322,47 +325,26 @@ useEffect(()=>{
    return
   }
 
-  // 2. Automatically accept any valid Rally invitations for this email
+  // 2. Load pending Rally invitations. Invitees choose Accept or Decline.
+  let appPendingInvites:SpaceInvitation[]=[]
+
   if(authUser.email){
-   const {data:pendingInvites,error:inviteLoadError}=await supabase
-    .from('space_invitations')
-    .select('id, space_id, role')
-    .ilike('email',authUser.email)
-    .eq('status','pending')
-    .gt('expires_at',new Date().toISOString())
+   const {data:pendingInviteRows,error:inviteLoadError}=await supabase
+    .rpc('get_my_pending_space_invitations')
 
    if(inviteLoadError){
     console.error('Unable to load Rally invitations:',inviteLoadError)
    }else{
-    for(const invitation of pendingInvites||[]){
-     const {error:joinError}=await supabase
-      .from('space_members')
-      .upsert({
-       space_id:invitation.space_id,
-       user_id:authUser.id,
-       role:invitation.role || 'member'
-      },{
-       onConflict:'space_id,user_id',
-       ignoreDuplicates:true
-      })
-
-     if(joinError){
-      console.error('Unable to accept Rally invitation:',joinError)
-      continue
-     }
-
-     const {error:inviteUpdateError}=await supabase
-      .from('space_invitations')
-      .update({status:'accepted'})
-      .eq('id',invitation.id)
-
-     if(inviteUpdateError){
-      console.error(
-       'Unable to mark Rally invitation accepted:',
-       inviteUpdateError
-      )
-     }
-    }
+    appPendingInvites=(pendingInviteRows||[]).map((invitation:any)=>({
+     id:invitation.id,
+     spaceId:invitation.space_id,
+     spaceName:invitation.space_name || 'Rally Space',
+     spaceIcon:invitation.space_icon || '✦',
+     role:(invitation.role || 'member') as SpaceInvitation['role'],
+     invitedByName:invitation.inviter_name || 'A Rally member',
+     expiresAt:invitation.expires_at,
+     createdAt:invitation.created_at
+    }))
    }
   }
 
@@ -445,6 +427,7 @@ useEffect(()=>{
      challenges:[],
      history:[],
      rewardIdeas:[],
+     pendingInvites:appPendingInvites,
      notificationPrefs:{
       ...current.notificationPrefs,
       [authUser.id]:loadedPrefs
@@ -1156,7 +1139,8 @@ useEffect(()=>{
     },
     accountPrefs,
     subscription,
-    rewardIdeas
+    rewardIdeas,
+    pendingInvites:appPendingInvites
    }))
   }
   } finally {
@@ -1169,7 +1153,7 @@ useEffect(()=>{
  return ()=>{
   cancelled=true
  }
-},[authUser])
+},[authUser,accountRefresh])
 
 console.log('Supabase connected:', supabase)
 const [data,setData]=useState<AppData>(load)
@@ -1184,6 +1168,39 @@ const [data,setData]=useState<AppData>(load)
  const myRole=activeSpace?roleFor(activeSpace,user.id):undefined
  const update=(next:AppData)=>{setData(next);saveLocal(next)}
  const note=(msg:string)=>{setToast(msg);setTimeout(()=>setToast(''),1800)}
+ const respondToInvite=async(invitation:SpaceInvitation,response:'accepted'|'declined')=>{
+  const {error}=await supabase
+   .rpc('respond_to_space_invitation',{
+    p_invitation_id:invitation.id,
+    p_response:response
+   })
+
+  if(error){
+   console.error('Unable to respond to Rally invitation:',error)
+   note(
+    response==='accepted'
+     ? 'Unable to join this Rally right now.'
+     : 'Unable to decline this invitation right now.'
+   )
+   return
+  }
+
+  setData(current=>({
+   ...current,
+   pendingInvites:(current.pendingInvites||[]).filter(
+    item=>item.id!==invitation.id
+   )
+  }))
+
+  if(response==='accepted'){
+   note(`You joined ${invitation.spaceName}.`)
+   setSpaceId('all')
+   setScreen('home')
+   setAccountRefresh(value=>value+1)
+  }else{
+   note(`Invitation to ${invitation.spaceName} declined.`)
+  }
+ }
  const logout = async () => {
   const { error } = await supabase.auth.signOut()
 
@@ -1213,7 +1230,7 @@ const [data,setData]=useState<AppData>(load)
   )
  },[data.activities,spaceId,user.id,spaces])
  const myNotifications=data.notifications.filter(n=>n.recipientId===user.id)
- const unread=myNotifications.filter(n=>!n.read).length
+ const unread=myNotifications.filter(n=>!n.read).length+(data.pendingInvites?.length||0)
 
  const saveNotifications=async(rows:any[])=>{
   if(rows.length===0) return
@@ -2066,6 +2083,7 @@ if (!authenticated) {
      data={data}
      user={user}
      update={update}
+     respondToInvite={respondToInvite}
      setSpaceId={setSpaceId}
      setScreen={setScreen}
     />
@@ -2145,6 +2163,7 @@ if (!authenticated) {
          complete={complete}
          approve={approve}
          sendBack={sendBack}
+         respondToInvite={respondToInvite}
          setSpaceId={setSpaceId}
          setScreen={setScreen}
         />
@@ -2333,7 +2352,7 @@ function RallyTabs({screen,space,setScreen}:{screen:Screen;space:Space;setScreen
  </nav>
 }
 
-function GlobalHome({data,user,spaces,activities,complete,approve,sendBack,setSpaceId,setScreen}:{data:AppData;user:Member;spaces:Space[];activities:Activity[];complete:(a:Activity)=>void;approve:(a:Activity)=>void;sendBack:(a:Activity)=>void;setSpaceId:(id:string)=>void;setScreen:(s:Screen)=>void}){
+function GlobalHome({data,user,spaces,activities,complete,approve,sendBack,respondToInvite,setSpaceId,setScreen}:{data:AppData;user:Member;spaces:Space[];activities:Activity[];complete:(a:Activity)=>void;approve:(a:Activity)=>void;sendBack:(a:Activity)=>void;respondToInvite:(invitation:SpaceInvitation,response:'accepted'|'declined')=>void|Promise<void>;setSpaceId:(id:string)=>void;setScreen:(s:Screen)=>void}){
  const ready=activities
   .filter(a=>
    a.status==='open' &&
@@ -2347,6 +2366,8 @@ function GlobalHome({data,user,spaces,activities,complete,approve,sendBack,setSp
  const approvals=activities.filter(a=>
   a.status==='pending'&&a.approverIds.includes(user.id)
  )
+ const pendingInvites=data.pendingInvites||[]
+ const attentionCount=approvals.length+pendingInvites.length
 
  const totalWeekly=spaces.reduce(
   (sum,space)=>sum+(spaceMember(space,user.id)?.weekly||0),0
@@ -2417,14 +2438,23 @@ function GlobalHome({data,user,spaces,activities,complete,approve,sendBack,setSp
    </div>
   </section>
 
-  {approvals.length>0&&
+  {attentionCount>0&&
    <section className="attention-panel">
     <div className="section-title compact-title">
      <div>
       <p className="eyebrow">Needs your attention</p>
-      <h2>{approvals.length} {approvals.length===1?'completion needs':'completions need'} you</h2>
+      <h2>{attentionCount} {attentionCount===1?'item needs':'items need'} you</h2>
      </div>
     </div>
+
+    {pendingInvites.map(invitation=>
+     <PendingInvitationCard
+      key={invitation.id}
+      invitation={invitation}
+      respond={respondToInvite}
+     />
+    )}
+
     {approvals.slice(0,3).map(activity=>
      <ActivityCard
       key={activity.id}
@@ -3888,7 +3918,7 @@ function Members({data,space,user,update,note}:{data:AppData;space:Space;user:Me
   setInviteEmail('')
   setInviteRole('member')
   setInviteOpen(false)
-  note('Invitation created. They’ll join when they sign in with that email.')
+  note('Invitation sent. They can accept or decline it after signing in with that email.')
  }
 
  const changeRole=async(id:string,nextRole:Role)=>{
@@ -5028,8 +5058,53 @@ function FriendsSettings({data,user,update,note}:{data:AppData;user:Member;updat
  </>
 }
 
-function Notifications({data,user,update,setSpaceId,setScreen}:{data:AppData;user:Member;update:(d:AppData)=>void;setSpaceId:(id:string)=>void;setScreen:(s:Screen)=>void}){
+function PendingInvitationCard({invitation,respond}:{invitation:SpaceInvitation;respond:(invitation:SpaceInvitation,response:'accepted'|'declined')=>void|Promise<void>}){
+ const [busy,setBusy]=useState<'accepted'|'declined'|null>(null)
+
+ const choose=async(response:'accepted'|'declined')=>{
+  if(busy) return
+  setBusy(response)
+  await respond(invitation,response)
+  setBusy(null)
+ }
+
+ return <article className="space-invitation-card">
+  <span className="space-invitation-icon">{invitation.spaceIcon}</span>
+  <div className="space-invitation-copy">
+   <p className="eyebrow">Rally invitation</p>
+   <h3>{invitation.spaceName}</h3>
+   <p>
+    <b>{invitation.invitedByName}</b> invited you as a{' '}
+    {invitation.role==='admin'
+     ? 'Rally Admin'
+     : invitation.role==='approver'
+      ? 'Rally Approver'
+      : 'Member'}.
+   </p>
+   <small>Invitation expires {formatTimestamp(invitation.expiresAt)}</small>
+  </div>
+  <div className="space-invitation-actions">
+   <button
+    className="secondary"
+    disabled={!!busy}
+    onClick={()=>choose('declined')}
+   >
+    {busy==='declined'?'Declining…':'Decline'}
+   </button>
+   <button
+    className="primary"
+    disabled={!!busy}
+    onClick={()=>choose('accepted')}
+   >
+    {busy==='accepted'?'Joining…':'Accept invite'}
+   </button>
+  </div>
+ </article>
+}
+
+function Notifications({data,user,update,respondToInvite,setSpaceId,setScreen}:{data:AppData;user:Member;update:(d:AppData)=>void;respondToInvite:(invitation:SpaceInvitation,response:'accepted'|'declined')=>void|Promise<void>;setSpaceId:(id:string)=>void;setScreen:(s:Screen)=>void}){
  const notes=data.notifications.filter(n=>n.recipientId===user.id)
+ const pendingInvites=data.pendingInvites||[]
 
  const open=async(n:Notification)=>{
   if(!n.read){
@@ -5060,8 +5135,26 @@ function Notifications({data,user,update,setSpaceId,setScreen}:{data:AppData;use
    <div><p className="eyebrow">Notifications</p><h1>Things worth noticing</h1><p>Actionable updates first. Everything else stays quiet.</p></div>
   </section>
 
+  {pendingInvites.length>0&&
+   <section className="panel notification-invitations">
+    <div className="section-title">
+     <div>
+      <p className="eyebrow">Pending invitations</p>
+      <h2>Rallies waiting for your response</h2>
+     </div>
+    </div>
+    {pendingInvites.map(invitation=>
+     <PendingInvitationCard
+      key={invitation.id}
+      invitation={invitation}
+      respond={respondToInvite}
+     />
+    )}
+   </section>
+  }
+
   <section className="panel notification-feed">
-   {notes.length===0&&<div className="empty friendly-empty">You’re all caught up.</div>}
+   {notes.length===0&&pendingInvites.length===0&&<div className="empty friendly-empty">You’re all caught up.</div>}
    {notes.map(n=>
     <button
      className={`notification ${n.read?'':'unread'}`}
