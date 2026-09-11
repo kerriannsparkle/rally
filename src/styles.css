@@ -5513,3 +5513,59 @@ small{line-height:1.45}
  .hero-content{max-width:78%}.hero-route{right:-28px;width:52%;opacity:.72}.summary-grid{grid-template-columns:1fr 70px!important}.progress-ring{width:66px;height:66px}.point-number{font-size:3rem}.summary-stat{min-width:95px}.activity-card{min-height:270px!important}.activity-bottom{align-items:flex-start!important;flex-direction:column}.activity-bottom .token{align-self:flex-end;margin-top:-36px}.canva-activity-actions{padding-right:58px}.canva-top-actions{gap:6px}.canva-icon-button,.icon-button,.bell,.avatar{width:38px;height:38px}.canva-page-head h1{font-size:2.15rem}.canva-treat-card{min-height:330px}
 }
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+
+/* Rally 10 — final Insights expansion */
+.insights-head{align-items:flex-end}.insight-period-picker{display:grid;gap:6px;min-width:170px;color:var(--muted);font-size:.75rem;font-weight:800}.insight-period-picker select{min-height:43px;padding:0 34px 0 12px;border:1px solid var(--line);border-radius:13px;background:var(--white);color:var(--ink);font-weight:800}.insight-kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:18px}.insight-kpi{display:grid;gap:5px;min-height:148px}.insight-kpi>span{width:38px;height:38px;display:grid;place-items:center;border:2px solid var(--ink);border-radius:13px;background:var(--sun2);box-shadow:2px 2px 0 rgba(41,37,34,.15);font-size:1rem;font-weight:900}.insight-kpi small{margin-top:6px;color:var(--muted);font-weight:800}.insight-kpi strong{font-family:Fraunces,serif;font-size:2.1rem;line-height:1;color:var(--ink)}.insight-kpi p{color:var(--muted);font-size:.76rem;font-weight:700;line-height:1.4}.insight-two-col{display:grid;grid-template-columns:minmax(0,1.12fr) minmax(280px,.88fr);gap:18px;margin-bottom:18px}.insight-mini-toggle{flex:0 0 auto}.insight-mini-toggle button{min-height:30px;padding:0 10px;font-size:.72rem}.insight-pattern-list,.contribution-list,.member-completion-list,.insight-bars,.insight-goal-list{display:grid;gap:12px}.insight-highlight{display:flex;align-items:center;gap:12px;padding:13px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}.insight-highlight .state-art{width:42px;height:42px;border-radius:13px;box-shadow:2px 2px 0 rgba(41,37,34,.12)}.insight-highlight strong,.insight-highlight span{display:block}.insight-highlight strong{font-size:.9rem}.insight-highlight span{margin-top:3px;color:var(--muted);font-size:.76rem;line-height:1.4}.insight-bar-row{display:grid;gap:7px}.insight-bar-row>div:first-child{display:flex;align-items:center;justify-content:space-between;gap:10px}.insight-bar-row strong{font-size:.84rem}.insight-bar-row span{color:var(--muted);font-size:.74rem;font-weight:800}.insight-bar-row .progress-track{height:9px}.contribution-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(160px,.62fr);align-items:center;gap:14px;padding:12px 0;border-top:1px solid var(--line)}.contribution-row:first-child{border-top:0}.contribution-person{display:flex;align-items:center;gap:10px;min-width:0}.contribution-person .avatar{width:38px;height:38px;flex:0 0 auto}.contribution-person strong,.contribution-person small{display:block}.contribution-person strong{font-size:.86rem}.contribution-person small{margin-top:2px;color:var(--muted);font-size:.72rem}.contribution-rank{width:27px;height:27px;display:grid;place-items:center;border:1px solid var(--line);border-radius:9px;background:var(--paper);font-size:.7rem;font-weight:900}.contribution-rank.rank-1{background:var(--sun2);border-color:#efd15b}.contribution-share{display:grid;grid-template-columns:minmax(0,1fr) 40px;align-items:center;gap:9px}.contribution-share b{text-align:right;font-size:.8rem}.member-completion-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-top:1px solid var(--line)}.member-completion-row:first-child{border-top:0}.member-completion-row strong,.member-completion-row span{display:block}.member-completion-row strong{font-size:.86rem}.member-completion-row span{margin-top:3px;color:var(--muted);font-size:.73rem}.member-completion-row>b{font-family:Fraunces,serif;font-size:1.25rem}.insight-footnote{margin-top:13px;color:var(--muted);font-size:.72rem;line-height:1.45}.insight-goal-row{display:grid;grid-template-columns:38px 1fr;align-items:center;gap:11px;padding:11px;border:1px solid var(--line);border-radius:16px;background:var(--paper)}.insight-goal-row>span{width:38px;height:38px;display:grid;place-items:center;border-radius:12px;background:var(--lav);font-size:1.2rem}.insight-goal-row strong,.insight-goal-row small{display:block}.insight-goal-row strong{margin-bottom:7px;font-size:.84rem}.insight-goal-row small{margin-top:5px;color:var(--muted);font-size:.7rem}.insight-goal-row .progress-track{height:8px}.insight-summary-card{margin-bottom:8px}.insight-summary-chips{display:flex;flex-wrap:wrap;gap:8px}.insight-summary-chips span{padding:7px 10px;border-radius:999px;background:#f8f4ed;color:var(--muted);font-size:.72rem;font-weight:800}.shared-insights .contribution-card{background:linear-gradient(180deg,#fff 0%,#fffaf0 100%)}
+
+@media(max-width:980px){.insight-kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.insight-two-col{grid-template-columns:1fr}}
+@media(max-width:620px){.insights-head{align-items:flex-start}.insight-period-picker{width:100%;min-width:0}.insight-period-picker select{width:100%}.insight-kpi-grid{grid-template-columns:1fr 1fr;gap:10px}.insight-kpi{min-height:132px;padding:16px}.insight-kpi strong{font-size:1.75rem}.contribution-row{grid-template-columns:1fr}.contribution-share{padding-left:37px}.insight-two-col{gap:12px}.insight-summary-chips{display:grid;grid-template-columns:1fr 1fr}.insight-mini-toggle{max-width:100%}}
+
+/* Rally 10 pre-deploy finishing touches — keep Canva visual system intact */
+.hero-card .summary-stats{
+  display:grid!important;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:12px!important;
+  align-items:start;
+}
+.hero-card .summary-stat{min-width:0;margin:0}
+.hero-card .summary-stat strong,.hero-card .summary-stat span{overflow-wrap:anywhere}
+
+.inline-edit-shell,.pause-until-shell{
+  margin-top:10px;
+  border:1px solid var(--line,#e8dece);
+  border-radius:14px;
+  background:rgba(255,255,255,.72);
+  overflow:hidden;
+}
+.inline-edit-shell>summary,.pause-until-shell>summary{
+  list-style:none;
+  cursor:pointer;
+  padding:10px 12px;
+  font-size:.8rem;
+  font-weight:800;
+  color:var(--ink,#292522);
+}
+.inline-edit-shell>summary::-webkit-details-marker,.pause-until-shell>summary::-webkit-details-marker{display:none}
+.inline-edit-shell>summary:after,.pause-until-shell>summary:after{content:'+';float:right;font-weight:900}
+.inline-edit-shell[open]>summary:after,.pause-until-shell[open]>summary:after{content:'–'}
+.inline-edit-form{padding:14px;border-top:1px solid var(--line,#e8dece);background:var(--paper,#fffdf8)}
+.inline-edit-form textarea{min-height:88px;resize:vertical}
+.activity-edit-shell{max-width:680px}
+.activity-edit-shell .assignment-pills{margin-top:8px}
+.pause-until-shell{display:inline-block;margin:0;background:white}
+.pause-until-shell>div{display:grid;gap:6px;padding:10px 12px;border-top:1px solid var(--line,#e8dece);min-width:220px}
+.pause-until-shell input{min-height:40px;padding:7px 9px;border:1px solid #dcd3c5;border-radius:10px;background:#fff}
+.pause-until-shell small{max-width:240px;color:var(--muted,#766f66);line-height:1.35}
+.settings-activity-info>div{min-width:0;flex:1}
+.settings-activity-row{align-items:flex-start}
+
+@media(max-width:760px){
+  .hero-card .summary-stats{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px!important}
+  .hero-card .summary-stat{padding-left:8px}
+  .hero-card .summary-stat strong{font-size:.78rem}
+  .hero-card .summary-stat span{font-size:.66rem;line-height:1.25}
+  .inline-edit-form .two,.inline-edit-form .three{grid-template-columns:1fr!important}
+  .pause-until-shell{width:100%}
+  .pause-until-shell>div{min-width:0}
+}
+.activity-edit-blocked{margin-top:8px;max-width:600px;padding:8px 10px;border-radius:11px;background:#fff0c9;color:#7a5310;font-weight:700;line-height:1.35}
