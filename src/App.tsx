@@ -119,6 +119,61 @@ const tierFor=(points:number)=>{
  if(points>=2000) return 'Silver'
  return 'Bronze'
 }
+
+const localDateKey=(date:Date)=>{
+ const year=date.getFullYear()
+ const month=String(date.getMonth()+1).padStart(2,'0')
+ const day=String(date.getDate()).padStart(2,'0')
+ return `${year}-${month}-${day}`
+}
+
+const periodKeyFor=(recurrence:string,date=new Date())=>{
+ const value=recurrence.toLowerCase()
+
+ if(value==='one time') return 'once'
+
+ if(value==='every day'){
+  return `day:${localDateKey(date)}`
+ }
+
+ if(value==='every week'||value==='3x/week'){
+  const start=new Date(date)
+  const daysSinceMonday=(start.getDay()+6)%7
+  start.setDate(start.getDate()-daysSinceMonday)
+  return `week:${localDateKey(start)}`
+ }
+
+ if(value==='every other week'){
+  const start=new Date(date)
+  const daysSinceMonday=(start.getDay()+6)%7
+  start.setDate(start.getDate()-daysSinceMonday)
+  const mondayNumber=Math.floor(start.getTime()/604800000)
+  return `biweek:${Math.floor(mondayNumber/2)}`
+ }
+
+ if(value==='twice/month'){
+  const half=date.getDate()<=15?'1':'2'
+  return `half-month:${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${half}`
+ }
+
+ if(value==='every 90 days'){
+  const dayNumber=Math.floor(
+   Date.UTC(date.getFullYear(),date.getMonth(),date.getDate())/86400000
+  )
+  return `90-day:${Math.floor(dayNumber/90)}`
+ }
+
+ return `day:${localDateKey(date)}`
+}
+
+const startOfCurrentWeek=()=>{
+ const start=new Date()
+ const daysSinceMonday=(start.getDay()+6)%7
+ start.setHours(0,0,0,0)
+ start.setDate(start.getDate()-daysSinceMonday)
+ return start
+}
+
 export default function App(){
 const [authenticated,setAuthenticated]=useState(false)
 const [sessionChecked,setSessionChecked]=useState(false)
@@ -146,10 +201,10 @@ useEffect(()=>{
  return ()=>subscription.unsubscribe()
 },[])
 
-useEffect(() => {
- if (!authUser) return
+useEffect(()=>{
+ if(!authUser) return
 
- const loadAccount = async () => {
+ const loadAccount=async()=>{
 
   // 1. Load the logged-in user's Rally profile
   const {data:profile,error:profileError}=await supabase
@@ -176,269 +231,307 @@ useEffect(() => {
 
   const spaceIds=(memberships||[]).map(m=>m.space_id)
 
-// Build the real Rally user from Supabase
-const lifetimePoints=profile?.lifetime_points ?? 0
+  const lifetimePoints=profile?.lifetime_points ?? 0
 
-const currentMember:Member={
- id:authUser.id,
- name:
-  profile?.display_name ||
-  String(authUser.user_metadata?.display_name || '') ||
-  authUser.email?.split('@')[0] ||
-  'Rally User',
- avatar:profile?.avatar_url || undefined,
- globalLifetime:lifetimePoints,
- tier:tierFor(lifetimePoints)
-}
+  const currentMember:Member={
+   id:authUser.id,
+   name:
+    profile?.display_name ||
+    String(authUser.user_metadata?.display_name || '') ||
+    authUser.email?.split('@')[0] ||
+    'Rally User',
+   avatar:profile?.avatar_url || undefined,
+   globalLifetime:lifetimePoints,
+   tier:tierFor(lifetimePoints)
+  }
 
-// User may not belong to any Rally Spaces yet
-if(spaceIds.length===0){
- setData(current=>({
-  ...current,
-  currentUserId:authUser.id,
-  members:[currentMember],
-  spaces:[]
- }))
+  // User may not belong to any Rally Spaces yet
+  if(spaceIds.length===0){
+   setData(current=>({
+    ...current,
+    currentUserId:authUser.id,
+    members:[currentMember],
+    spaces:[],
+    activities:[]
+   }))
+   return
+  }
 
- return
-}
+  // 3. Load every member belonging to the user's Rally Spaces
+  const {data:allMemberships,error:allMembershipsError}=await supabase
+   .from('space_members')
+   .select('space_id, user_id, role, joined_at, shared_contribution_total')
+   .in('space_id',spaceIds)
 
-// Load every member belonging to the user's Rally Spaces
-const {data:allMemberships,error:allMembershipsError}=await supabase
- .from('space_members')
- .select('space_id, user_id, role, joined_at, shared_contribution_total')
- .in('space_id',spaceIds)
+  if(allMembershipsError){
+   console.error('Unable to load Rally members:',allMembershipsError)
+   return
+  }
 
-if(allMembershipsError){
- console.error('Unable to load Rally members:',allMembershipsError)
- return
-}
+  const memberIds=[
+   ...new Set((allMemberships||[]).map(member=>member.user_id))
+  ]
 
-const memberIds=[
- ...new Set(
-  (allMemberships||[]).map(member=>member.user_id)
- )
-]
+  const {data:memberProfiles,error:memberProfilesError}=await supabase
+   .from('profiles')
+   .select('id, display_name, avatar_url, lifetime_points')
+   .in('id',memberIds)
 
-// Load the profiles for those Rally members
-const {data:memberProfiles,error:memberProfilesError}=await supabase
- .from('profiles')
- .select('id, display_name, avatar_url, lifetime_points')
- .in('id',memberIds)
+  if(memberProfilesError){
+   console.error('Unable to load member profiles:',memberProfilesError)
+   return
+  }
 
-if(memberProfilesError){
- console.error('Unable to load member profiles:',memberProfilesError)
- return
-}
+  // 4. Load only spaces this user belongs to
+  const {data:supabaseSpaces,error:spacesError}=await supabase
+   .from('spaces')
+   .select('*')
+   .in('id',spaceIds)
 
-  // 3. Load only the spaces this user actually belongs to
-const {data:supabaseSpaces,error:spacesError}=await supabase
- .from('spaces')
- .select('*')
- .in('id',spaceIds)
+  if(spacesError){
+   console.error('Unable to load Rally Spaces:',spacesError)
+   return
+  }
 
-if(spacesError){
- console.error('Unable to load Rally Spaces:',spacesError)
- return
-}
-// Load activities belonging to these Rally Spaces
-const {data:supabaseActivities,error:activitiesError}=await supabase
- .from('activities')
- .select('*')
- .in('space_id',spaceIds)
+  // 5. Load activities for those Rally Spaces
+  const {data:supabaseActivities,error:activitiesError}=await supabase
+   .from('activities')
+   .select('*')
+   .in('space_id',spaceIds)
 
-if(activitiesError){
- console.error('Unable to load Rally activities:',activitiesError)
- return
-}
+  if(activitiesError){
+   console.error('Unable to load Rally activities:',activitiesError)
+   return
+  }
 
-// Load assignments for those activities
-const activityIds=(supabaseActivities||[]).map(
- activity=>activity.id
-)
+  const activityIds=(supabaseActivities||[]).map(activity=>activity.id)
 
-let activityAssignments:any[]=[]
-let activityApprovers:any[]=[]
-let activityCompletions:any[]=[]
-let pointsLedger:any[]=[]
-if(activityIds.length>0){
+  let activityAssignments:any[]=[]
+  let activityApprovers:any[]=[]
+  let activityCompletions:any[]=[]
 
- const {data:assignments,error:assignmentsError}=await supabase
-  .from('activity_assignments')
-  .select('activity_id, user_id')
-  .in('activity_id',activityIds)
+  if(activityIds.length>0){
 
- if(assignmentsError){
-  console.error('Unable to load activity assignments:',assignmentsError)
-  return
+   const {data:assignments,error:assignmentsError}=await supabase
+    .from('activity_assignments')
+    .select('activity_id, user_id')
+    .in('activity_id',activityIds)
+
+   if(assignmentsError){
+    console.error('Unable to load activity assignments:',assignmentsError)
+    return
+   }
+
+   activityAssignments=assignments || []
+
+   const {data:approvers,error:approversError}=await supabase
+    .from('activity_approvers')
+    .select('activity_id, user_id')
+    .in('activity_id',activityIds)
+
+   if(approversError){
+    console.error('Unable to load activity approvers:',approversError)
+    return
+   }
+
+   activityApprovers=approvers || []
+
+   const {data:completions,error:completionsError}=await supabase
+    .from('activity_completions')
+    .select(
+     'id, activity_id, space_id, completed_by, points, period_key, approval_status, approved_by, approved_at, completed_at'
+    )
+    .in('activity_id',activityIds)
+    .order('completed_at',{ascending:false})
+
+   if(completionsError){
+    console.error('Unable to load activity completions:',completionsError)
+    return
+   }
+
+   activityCompletions=completions || []
+  }
+
+  // 6. Load point transactions for these Rally Spaces
+  const {data:pointsLedger,error:ledgerError}=await supabase
+   .from('points_ledger')
+   .select(
+    'id, space_id, user_id, amount, transaction_type, activity_completion_id, treat_id, note, created_at'
+   )
+   .in('space_id',spaceIds)
+
+  if(ledgerError){
+   console.error('Unable to load Rally points:',ledgerError)
+   return
+  }
+
+  const ledger=pointsLedger || []
+  const weekStart=startOfCurrentWeek()
+
+  const earnedLifetime=(entries:any[])=>entries
+   .filter(entry=>
+    ['activity_earned','activity_undo','admin_adjustment'].includes(
+     entry.transaction_type
+    )
+   )
+   .reduce((sum,entry)=>sum+(entry.amount||0),0)
+
+  const availableBalance=(entries:any[])=>entries
+   .reduce((sum,entry)=>sum+(entry.amount||0),0)
+
+  const weeklyPoints=(entries:any[])=>entries
+   .filter(entry=>
+    ['activity_earned','activity_undo'].includes(entry.transaction_type) &&
+    new Date(entry.created_at)>=weekStart
+   )
+   .reduce((sum,entry)=>sum+(entry.amount||0),0)
+
+  const loadedMembers:Member[]=memberIds.map(memberId=>{
+   const memberProfile=(memberProfiles||[]).find(
+    item=>item.id===memberId
+   )
+
+   const memberLedger=ledger.filter(entry=>entry.user_id===memberId)
+   const calculatedLifetime=Math.max(0,earnedLifetime(memberLedger))
+   const fallbackLifetime=memberProfile?.lifetime_points ?? 0
+   const globalLifetime=memberLedger.length
+    ? calculatedLifetime
+    : fallbackLifetime
+
+   return {
+    id:memberId,
+    name:
+     memberProfile?.display_name ||
+     (memberId===authUser.id ? currentMember.name : 'Rally Member'),
+    avatar:memberProfile?.avatar_url || undefined,
+    globalLifetime,
+    tier:tierFor(globalLifetime)
+   }
+  })
+
+  // 7. Convert memberships into Rally's current Space format
+  const appSpaces:Space[]=(supabaseSpaces||[]).map(space=>{
+
+   const spaceMemberships=(allMemberships||[]).filter(
+    membership=>membership.space_id===space.id
+   )
+
+   return {
+    id:space.id,
+    name:space.name,
+    icon:space.icon || '✨',
+    type:space.type as SpaceType,
+    timezone:space.timezone || 'America/New_York',
+
+    members:spaceMemberships.map(membership=>{
+     const memberLedger=ledger.filter(
+      entry=>
+       entry.space_id===space.id &&
+       entry.user_id===membership.user_id
+     )
+
+     return {
+      memberId:membership.user_id,
+      role:normalizeRole(membership.role || 'member'),
+      balance:Math.max(0,availableBalance(memberLedger)),
+      lifetime:Math.max(0,earnedLifetime(memberLedger)),
+      weekly:Math.max(0,weeklyPoints(memberLedger)),
+      joinedAt:
+       membership.joined_at ||
+       space.created_at ||
+       new Date().toISOString()
+     }
+    }),
+
+    weeklyLeaderboard:space.weekly_leaderboard ?? true,
+    poolEnabled:space.pool_enabled ?? false,
+    poolBalance:space.pool_balance ?? 0
+   }
+  })
+
+  // 8. Convert Supabase activities into Rally's current Activity format
+  const appActivities:Activity[]=(supabaseActivities||[]).map(activity=>{
+
+   const assignedTo=(activityAssignments||[])
+    .filter(assignment=>assignment.activity_id===activity.id)
+    .map(assignment=>assignment.user_id)
+
+   const approverIds=(activityApprovers||[])
+    .filter(approver=>approver.activity_id===activity.id)
+    .map(approver=>approver.user_id)
+
+   const currentPeriodKey=periodKeyFor(
+    activity.recurrence || 'One time'
+   )
+
+   const latestCompletion=activityCompletions.find(
+    completion=>
+     completion.activity_id===activity.id &&
+     completion.period_key===currentPeriodKey
+   )
+
+   const completionStatus:ActivityStatus=
+    latestCompletion
+     ? latestCompletion.approval_status==='pending'
+      ? 'pending'
+      : latestCompletion.approval_status==='approved' ||
+        latestCompletion.approval_status==='not_required'
+       ? 'complete'
+       : 'open'
+     : (activity.status==='active'
+        ? 'open'
+        : activity.status) as ActivityStatus
+
+   return {
+    id:activity.id,
+    spaceId:activity.space_id,
+    name:activity.name,
+    icon:activity.icon || '✨',
+    category:activity.category || 'General',
+    points:activity.points ?? 0,
+    recurrence:activity.recurrence || 'One time',
+    status:completionStatus,
+    completedBy:
+     completionStatus!=='open'
+      ? latestCompletion?.completed_by
+      : undefined,
+    completedAt:
+     completionStatus!=='open'
+      ? latestCompletion?.completed_at
+      : undefined,
+    visibility:(activity.visibility || 'space') as Visibility,
+    assignedTo,
+    completionMode:
+     (activity.completion_mode || 'shared_once') as CompletionMode,
+    approval:activity.require_approval ?? false,
+    approverIds,
+    proofMode:
+     activity.proof_mode==='required_photo'
+      ? 'Required photo'
+      : activity.proof_mode==='optional_photo'
+       ? 'Optional photo'
+       : 'None',
+    contributesToGoals:
+     activity.contributes_to_goals ?? false,
+    pointDestination:
+     (activity.point_destination || 'personal') as
+      'personal'|'shared',
+    version:1,
+    createdBy:activity.created_by || authUser.id
+   }
+  })
+
+  // 9. Replace fake/local account data with Supabase-backed data
+  setData(current=>({
+   ...current,
+   currentUserId:authUser.id,
+   members:loadedMembers,
+   spaces:appSpaces,
+   activities:appActivities
+  }))
  }
 
- activityAssignments=assignments || []
-
- const {data:approvers,error:approversError}=await supabase
-  .from('activity_approvers')
-  .select('activity_id, user_id')
-  .in('activity_id',activityIds)
-
- if(approversError){
-  console.error('Unable to load activity approvers:',approversError)
-  return
- }
-
- activityApprovers=approvers || []
- const {data:completions,error:completionsError}=await supabase
-  .from('activity_completions')
-  .select(
-   'id, activity_id, space_id, completed_by, points, period_key, approval_status, approved_by, approved_at, completed_at'
-  )
-  .in('activity_id',activityIds)
-.order('completed_at',{ascending:false})
-
- if(completionsError){
-  console.error(
-   'Unable to load activity completions:',
-   completionsError
-  )
-  return
- }
-
- activityCompletions=completions || []}
-// Convert Supabase activities into Rally's current Activity format
-const appActivities:Activity[]=(supabaseActivities||[]).map(activity=>{
-
- const assignedTo=(activityAssignments||[])
-  .filter(assignment=>assignment.activity_id===activity.id)
-  .map(assignment=>assignment.user_id)
-
- const approverIds=(activityApprovers||[])
-  .filter(approver=>approver.activity_id===activity.id)
-  .map(approver=>approver.user_id)
-const latestCompletion=activityCompletions.find(
- completion=>completion.activity_id===activity.id
-)
-const completionStatus:ActivityStatus=
- latestCompletion
-  ? latestCompletion.approval_status==='pending'
-   ? 'pending'
-   : latestCompletion.approval_status==='approved' ||
-     latestCompletion.approval_status==='not_required'
-    ? 'complete'
-    : 'open'
-  : (activity.status==='active'
-     ? 'open'
-     : activity.status) as ActivityStatus
- return {
-  id:activity.id,
-  spaceId:activity.space_id,
-  name:activity.name,
-  icon:activity.icon || '✨',
-  category:activity.category || 'General',
-  points:activity.points ?? 0,
-  recurrence:activity.recurrence || 'One time',
-status:completionStatus,
-completedBy:
- completionStatus!=='open'
-  ? latestCompletion?.completed_by
-  : undefined,
-
-completedAt:
- completionStatus!=='open'
-  ? latestCompletion?.completed_at
-  : undefined,  visibility:(activity.visibility || 'space') as Visibility,
-  assignedTo,
-  completionMode:
-   (activity.completion_mode || 'shared_once') as CompletionMode,
-  approval:activity.require_approval ?? false,
-  approverIds,
-  proofMode:
- activity.proof_mode==='required_photo'
-  ? 'Required photo'
-  : activity.proof_mode==='optional_photo'
-   ? 'Optional photo'
-   : 'None',
-  contributesToGoals:
-   activity.contributes_to_goals ?? false,
-  pointDestination:
-   (activity.point_destination || 'personal') as
-    'personal'|'shared',
-  version:1,
-  createdBy:activity.created_by || authUser.id
- }
-})
-// Build Rally's member list from Supabase profiles
-const loadedMembers:Member[]=memberIds.map(memberId=>{
-
- const memberProfile=(memberProfiles||[]).find(
-  profile=>profile.id===memberId
- )
-
- const memberLifetimePoints=
-  memberProfile?.lifetime_points ?? 0
-
- return {
-  id:memberId,
-  name:
-   memberProfile?.display_name ||
-   (memberId===authUser.id
-    ? currentMember.name
-    : 'Rally Member'),
-  avatar:memberProfile?.avatar_url || undefined,
-  globalLifetime:memberLifetimePoints,
-  tier:tierFor(memberLifetimePoints)
- }
-})
-
-// 4. Convert Supabase memberships into Rally's current format
-const appSpaces:Space[]=(supabaseSpaces||[]).map(space=>{
-
- const spaceMemberships=(allMemberships||[]).filter(
-  membership=>membership.space_id===space.id
- )
-
- return {
-  id:space.id,
-  name:space.name,
-  icon:space.icon || '✨',
-  type:space.type as SpaceType,
-  timezone:space.timezone || 'America/New_York',
-
-  members:spaceMemberships.map(membership=>({
-   memberId:membership.user_id,
-   role:normalizeRole(membership.role || 'member'),
-   balance:0,
-   lifetime:
-    memberProfiles?.find(
-     profile=>profile.id===membership.user_id
-    )?.lifetime_points ?? 0,
-   weekly:0,
-   joinedAt:
-    membership.joined_at ||
-    space.created_at ||
-    new Date().toISOString()
-  })),
-
-  weeklyLeaderboard:
-   space.weekly_leaderboard ?? true,
-
-  poolEnabled:
-   space.pool_enabled ?? false,
-
-  poolBalance:
-   space.pool_balance ?? 0
- }
-})
-
-// 5. Replace fake Rally users/spaces with Supabase data
-setData(current=>({
- ...current,
- currentUserId:authUser.id,
- members:loadedMembers,
- spaces:appSpaces,
-activities:appActivities
-}))
-}
-
-loadAccount()
+ loadAccount()
 },[authUser])
 
 console.log('Supabase connected:', supabase)
@@ -478,53 +571,505 @@ const [data,setData]=useState<AppData>(load)
  const myNotifications=data.notifications.filter(n=>n.recipientId===user.id)
  const unread=myNotifications.filter(n=>!n.read).length
 
- const complete=(a:Activity)=>{
+ const complete=async(a:Activity)=>{
   if(a.status==='complete'){
-   undoComplete(a)
+   await undoComplete(a)
    return
   }
-  if(a.status==='pending'||a.status==='paused'||a.status==='archived')return
-  if(a.approval&&a.approverIds.length){
-   update({...data,activities:data.activities.map(x=>x.id===a.id?{...x,status:'pending',completedBy:user.id,completedAt:now()}:x),
+
+  if(
+   a.status==='pending' ||
+   a.status==='paused' ||
+   a.status==='archived'
+  ) return
+
+  const periodKey=periodKeyFor(a.recurrence)
+
+  let existingQuery=supabase
+   .from('activity_completions')
+   .select('id, approval_status')
+   .eq('activity_id',a.id)
+   .eq('period_key',periodKey)
+   .in('approval_status',['pending','approved','not_required'])
+
+  if(a.completionMode==='per_member'){
+   existingQuery=existingQuery.eq('completed_by',user.id)
+  }
+
+  const {data:existing,error:existingError}=await existingQuery.limit(1)
+
+  if(existingError){
+   console.error('Unable to check activity completion:',existingError)
+   note('Unable to complete activity.')
+   return
+  }
+
+  if(existing&&existing.length>0){
+   note(
+    existing[0].approval_status==='pending'
+     ? 'Already waiting for approval.'
+     : 'Already completed for this period.'
+   )
+   return
+  }
+
+  const approvalStatus=
+   a.approval&&a.approverIds.length
+    ? 'pending'
+    : 'not_required'
+
+  const {data:completion,error:completionError}=await supabase
+   .from('activity_completions')
+   .insert({
+    activity_id:a.id,
+    space_id:a.spaceId,
+    completed_by:user.id,
+    points:a.points,
+    period_key:periodKey,
+    approval_status:approvalStatus
+   })
+   .select('id, completed_by, completed_at, approval_status')
+   .single()
+
+  if(completionError){
+   console.error('Unable to create activity completion:',completionError)
+   note('Unable to complete activity.')
+   return
+  }
+
+  if(approvalStatus==='pending'){
+   update({
+    ...data,
+    activities:data.activities.map((x):Activity=>
+     x.id===a.id
+      ? {
+         ...x,
+         status:'pending',
+         completedBy:user.id,
+         completedAt:completion.completed_at
+        }
+      : x
+    ),
     notifications:[
-     ...a.approverIds.map(id=>({id:crypto.randomUUID(),recipientId:id,spaceId:a.spaceId,title:'Approval needed 👀',body:`${user.name} completed ${a.name}. Tap to review.`,read:false,action:'activities' as Screen,activityId:a.id,createdAt:'Just now'})),
+     ...a.approverIds.map(id=>({
+      id:crypto.randomUUID(),
+      recipientId:id,
+      spaceId:a.spaceId,
+      title:'Approval needed 👀',
+      body:`${user.name} completed ${a.name}. Tap to review.`,
+      read:false,
+      action:'activities' as Screen,
+      activityId:a.id,
+      createdAt:'Just now'
+     })),
      ...data.notifications
-    ]})
+    ]
+   })
+
    note('Sent for approval.')
    return
   }
-  award(a,user.id)
+
+  await award(
+   a,
+   user.id,
+   completion.id,
+   completion.completed_at
+  )
  }
- const award=(a:Activity,who:string)=>{
-  const s=data.spaces.find(x=>x.id===a.spaceId)!
-  const nextSpaces=data.spaces.map(sp=>sp.id!==s.id?sp:{...sp,members:sp.members.map(sm=>sm.memberId!==who?sm:{...sm,balance:sm.balance+a.points,lifetime:sm.lifetime+a.points,weekly:sm.weekly+a.points})})
-  const nextMembers=data.members.map(m=>m.id!==who?m:{...m,globalLifetime:m.globalLifetime+a.points})
-  const nextGoals=data.goals.map(g=>g.spaceId===a.spaceId&&g.status==='active'&&a.contributesToGoals?{...g,progress:Math.min(g.target,g.progress+a.points),status:(Math.min(g.target,g.progress+a.points)>=g.target?'reached':'active') as Goal['status']}:g)
-  const next={...data,spaces:nextSpaces,members:nextMembers,goals:nextGoals,
-   activities:data.activities.map((x):Activity=>x.id===a.id?{...x,status:'complete' as ActivityStatus,completedBy:who,completedAt:now()}:x),
-   notifications:data.notifications.map(n=>n.activityId===a.id&&n.recipientId===user.id?{...n,read:true}:n),
-   history:[historyEntry({id:crypto.randomUUID(),spaceId:a.spaceId,memberId:who,activityId:a.id,title:a.name,detail:`${memberName(data,who)} completed this activity`,points:a.points,kind:'earn',createdAt:now()}),...data.history]
+
+ const award=async(
+  a:Activity,
+  who:string,
+  completionId:string,
+  completedAt?:string
+ )=>{
+  const {data:existingLedger,error:ledgerCheckError}=await supabase
+   .from('points_ledger')
+   .select('id')
+   .eq('activity_completion_id',completionId)
+   .eq('transaction_type','activity_earned')
+   .limit(1)
+
+  if(ledgerCheckError){
+   console.error('Unable to check Rally points:',ledgerCheckError)
+   note('Unable to award points.')
+   return
   }
-  update(next)
+
+  if(!existingLedger?.length){
+   const {error:ledgerError}=await supabase
+    .from('points_ledger')
+    .insert({
+     space_id:a.spaceId,
+     user_id:who,
+     amount:a.points,
+     transaction_type:'activity_earned',
+     activity_completion_id:completionId,
+     note:`Completed ${a.name}`
+    })
+
+   if(ledgerError){
+    console.error('Unable to award Rally points:',ledgerError)
+    note('Activity completed, but points could not be awarded.')
+    return
+   }
+  }
+
+  const s=data.spaces.find(x=>x.id===a.spaceId)!
+
+  const nextSpaces=data.spaces.map(sp=>
+   sp.id!==s.id
+    ? sp
+    : {
+       ...sp,
+       members:sp.members.map(sm=>
+        sm.memberId!==who
+         ? sm
+         : {
+            ...sm,
+            balance:sm.balance+a.points,
+            lifetime:sm.lifetime+a.points,
+            weekly:sm.weekly+a.points
+           }
+       )
+      }
+  )
+
+  const nextMembers=data.members.map(m=>
+   m.id!==who
+    ? m
+    : {
+       ...m,
+       globalLifetime:m.globalLifetime+a.points,
+       tier:tierFor(m.globalLifetime+a.points)
+      }
+  )
+
+  const nextGoals=data.goals.map(g=>
+   g.spaceId===a.spaceId &&
+   g.status==='active' &&
+   a.contributesToGoals
+    ? {
+       ...g,
+       progress:Math.min(g.target,g.progress+a.points),
+       status:(
+        Math.min(g.target,g.progress+a.points)>=g.target
+         ? 'reached'
+         : 'active'
+       ) as Goal['status']
+      }
+    : g
+  )
+
+  update({
+   ...data,
+   spaces:nextSpaces,
+   members:nextMembers,
+   goals:nextGoals,
+   activities:data.activities.map((x):Activity=>
+    x.id===a.id
+     ? {
+        ...x,
+        status:'complete',
+        completedBy:who,
+        completedAt:completedAt || new Date().toISOString()
+       }
+     : x
+   ),
+   notifications:data.notifications.map(n=>
+    n.activityId===a.id&&n.recipientId===user.id
+     ? {...n,read:true}
+     : n
+   ),
+   history:[
+    historyEntry({
+     id:crypto.randomUUID(),
+     spaceId:a.spaceId,
+     memberId:who,
+     activityId:a.id,
+     title:a.name,
+     detail:`${memberName(data,who)} completed this activity`,
+     points:a.points,
+     kind:'earn',
+     createdAt:now()
+    }),
+    ...data.history
+   ]
+  })
+
   note(`+${a.points} points`)
  }
- const undoComplete=(a:Activity)=>{
-  if(a.status!=='complete'||!a.completedBy)return
+
+ const undoComplete=async(a:Activity)=>{
+  if(a.status!=='complete'||!a.completedBy) return
+
   const who=a.completedBy
+  const periodKey=periodKeyFor(a.recurrence)
+
+  const {data:completion,error:completionError}=await supabase
+   .from('activity_completions')
+   .select('id, approval_status')
+   .eq('activity_id',a.id)
+   .eq('completed_by',who)
+   .eq('period_key',periodKey)
+   .in('approval_status',['approved','not_required'])
+   .order('completed_at',{ascending:false})
+   .limit(1)
+   .maybeSingle()
+
+  if(completionError){
+   console.error('Unable to find completion to undo:',completionError)
+   note('Unable to undo completion.')
+   return
+  }
+
+  if(!completion){
+   note('No saved completion was found to undo.')
+   return
+  }
+
+  const {data:existingUndo,error:undoCheckError}=await supabase
+   .from('points_ledger')
+   .select('id')
+   .eq('activity_completion_id',completion.id)
+   .eq('transaction_type','activity_undo')
+   .limit(1)
+
+  if(undoCheckError){
+   console.error('Unable to check undo transaction:',undoCheckError)
+   note('Unable to undo completion.')
+   return
+  }
+
+  if(!existingUndo?.length){
+   const {error:ledgerError}=await supabase
+    .from('points_ledger')
+    .insert({
+     space_id:a.spaceId,
+     user_id:who,
+     amount:-a.points,
+     transaction_type:'activity_undo',
+     activity_completion_id:completion.id,
+     note:`Undid ${a.name}`
+    })
+
+   if(ledgerError){
+    console.error('Unable to remove Rally points:',ledgerError)
+    note('Unable to undo completion.')
+    return
+   }
+  }
+
+  const {error:updateCompletionError}=await supabase
+   .from('activity_completions')
+   .update({
+    approval_status:'rejected',
+    approved_by:null,
+    approved_at:null
+   })
+   .eq('id',completion.id)
+
+  if(updateCompletionError){
+   console.error(
+    'Unable to reopen activity completion:',
+    updateCompletionError
+   )
+   note('Points were adjusted, but the activity could not be reopened.')
+   return
+  }
+
   const s=data.spaces.find(x=>x.id===a.spaceId)!
-  const nextSpaces=data.spaces.map(sp=>sp.id!==s.id?sp:{...sp,members:sp.members.map(sm=>sm.memberId!==who?sm:{...sm,balance:Math.max(0,sm.balance-a.points),lifetime:Math.max(0,sm.lifetime-a.points),weekly:Math.max(0,sm.weekly-a.points)})})
-  const nextMembers=data.members.map(m=>m.id!==who?m:{...m,globalLifetime:Math.max(0,m.globalLifetime-a.points)})
-  const nextGoals=data.goals.map(g=>g.spaceId===a.spaceId&&a.contributesToGoals&&g.status!=='celebrated'?{...g,progress:Math.max(0,g.progress-a.points),status:(Math.max(0,g.progress-a.points)>=g.target?'reached':'active') as Goal['status']}:g)
-  update({...data,spaces:nextSpaces,members:nextMembers,goals:nextGoals,activities:data.activities.map((x):Activity=>x.id===a.id?{...x,status:'open' as ActivityStatus,completedBy:undefined,completedAt:undefined}:x),history:[historyEntry({id:crypto.randomUUID(),spaceId:a.spaceId,memberId:who,activityId:a.id,title:a.name,detail:`${memberName(data,who)} undid this completion`,points:a.points,kind:'undo',createdAt:now()}),...data.history]})
+
+  const nextSpaces=data.spaces.map(sp=>
+   sp.id!==s.id
+    ? sp
+    : {
+       ...sp,
+       members:sp.members.map(sm=>
+        sm.memberId!==who
+         ? sm
+         : {
+            ...sm,
+            balance:Math.max(0,sm.balance-a.points),
+            lifetime:Math.max(0,sm.lifetime-a.points),
+            weekly:Math.max(0,sm.weekly-a.points)
+           }
+       )
+      }
+  )
+
+  const nextMembers=data.members.map(m=>
+   m.id!==who
+    ? m
+    : {
+       ...m,
+       globalLifetime:Math.max(0,m.globalLifetime-a.points),
+       tier:tierFor(Math.max(0,m.globalLifetime-a.points))
+      }
+  )
+
+  const nextGoals=data.goals.map(g=>
+   g.spaceId===a.spaceId &&
+   a.contributesToGoals &&
+   g.status!=='celebrated'
+    ? {
+       ...g,
+       progress:Math.max(0,g.progress-a.points),
+       status:(
+        Math.max(0,g.progress-a.points)>=g.target
+         ? 'reached'
+         : 'active'
+       ) as Goal['status']
+      }
+    : g
+  )
+
+  update({
+   ...data,
+   spaces:nextSpaces,
+   members:nextMembers,
+   goals:nextGoals,
+   activities:data.activities.map((x):Activity=>
+    x.id===a.id
+     ? {
+        ...x,
+        status:'open',
+        completedBy:undefined,
+        completedAt:undefined
+       }
+     : x
+   ),
+   history:[
+    historyEntry({
+     id:crypto.randomUUID(),
+     spaceId:a.spaceId,
+     memberId:who,
+     activityId:a.id,
+     title:a.name,
+     detail:`${memberName(data,who)} undid this completion`,
+     points:a.points,
+     kind:'undo',
+     createdAt:now()
+    }),
+    ...data.history
+   ]
+  })
+
   note('Completion undone and points removed.')
  }
- const approve=(a:Activity)=>{
-  if(a.status!=='pending'||!a.approverIds.includes(user.id))return
-  award(a,a.completedBy||user.id)
+
+ const approve=async(a:Activity)=>{
+  if(a.status!=='pending'||!a.approverIds.includes(user.id)) return
+
+  const periodKey=periodKeyFor(a.recurrence)
+
+  const {data:completion,error:completionError}=await supabase
+   .from('activity_completions')
+   .select('id, completed_by, completed_at')
+   .eq('activity_id',a.id)
+   .eq('period_key',periodKey)
+   .eq('approval_status','pending')
+   .order('completed_at',{ascending:false})
+   .limit(1)
+   .maybeSingle()
+
+  if(completionError){
+   console.error('Unable to load pending approval:',completionError)
+   note('Unable to approve activity.')
+   return
+  }
+
+  if(!completion){
+   note('No pending completion was found.')
+   return
+  }
+
+  const approvedAt=new Date().toISOString()
+
+  const {error:approvalError}=await supabase
+   .from('activity_completions')
+   .update({
+    approval_status:'approved',
+    approved_by:user.id,
+    approved_at:approvedAt
+   })
+   .eq('id',completion.id)
+
+  if(approvalError){
+   console.error('Unable to approve activity:',approvalError)
+   note('Unable to approve activity.')
+   return
+  }
+
+  await award(
+   a,
+   completion.completed_by || user.id,
+   completion.id,
+   completion.completed_at
+  )
  }
- const sendBack=(a:Activity)=>{
-  if(a.status!=='pending'||!a.approverIds.includes(user.id))return
-  update({...data,activities:data.activities.map((x):Activity=>x.id===a.id?{...x,status:'open' as ActivityStatus,completedBy:undefined,completedAt:undefined}:x),notifications:data.notifications.map(n=>n.activityId===a.id&&n.recipientId===user.id?{...n,read:true}:n)})
+
+ const sendBack=async(a:Activity)=>{
+  if(a.status!=='pending'||!a.approverIds.includes(user.id)) return
+
+  const periodKey=periodKeyFor(a.recurrence)
+
+  const {data:completion,error:completionError}=await supabase
+   .from('activity_completions')
+   .select('id')
+   .eq('activity_id',a.id)
+   .eq('period_key',periodKey)
+   .eq('approval_status','pending')
+   .order('completed_at',{ascending:false})
+   .limit(1)
+   .maybeSingle()
+
+  if(completionError){
+   console.error('Unable to load pending completion:',completionError)
+   note('Unable to send activity back.')
+   return
+  }
+
+  if(!completion){
+   note('No pending completion was found.')
+   return
+  }
+
+  const {error:rejectError}=await supabase
+   .from('activity_completions')
+   .update({
+    approval_status:'rejected',
+    approved_by:user.id,
+    approved_at:new Date().toISOString()
+   })
+   .eq('id',completion.id)
+
+  if(rejectError){
+   console.error('Unable to send activity back:',rejectError)
+   note('Unable to send activity back.')
+   return
+  }
+
+  update({
+   ...data,
+   activities:data.activities.map((x):Activity=>
+    x.id===a.id
+     ? {
+        ...x,
+        status:'open',
+        completedBy:undefined,
+        completedAt:undefined
+       }
+     : x
+   ),
+   notifications:data.notifications.map(n=>
+    n.activityId===a.id&&n.recipientId===user.id
+     ? {...n,read:true}
+     : n
+   )
+  })
+
   note('Activity sent back.')
  }
  if (!sessionChecked) {
@@ -644,129 +1189,129 @@ function ActivityCard({a,data,user,complete,approve,sendBack}:{a:Activity;data:A
 function Activities({data,space,user,activities,complete,approve,sendBack,update,note}:{data:AppData;space:Space;user:Member;activities:Activity[];complete:(a:Activity)=>void;approve:(a:Activity)=>void;sendBack:(a:Activity)=>void;update:(d:AppData)=>void;note:(s:string)=>void}){
  const [name,setName]=useState('');const [category,setCategory]=useState('Home');const [requireApproval,setRequireApproval]=useState(false)
  const points=suggestedPoints(name,category)
-const add=async(e:FormEvent<HTMLFormElement>)=>{
- e.preventDefault()
+ const add=async(e:FormEvent<HTMLFormElement>)=>{
+  e.preventDefault()
 
- const form=e.currentTarget
- const f=new FormData(form)
+  const form=e.currentTarget
+  const f=new FormData(form)
 
- const assigned=Array.from(
-  f.getAll('assigned')
- ).map(String)
+  const assigned=Array.from(
+   f.getAll('assigned')
+  ).map(String)
 
- const approvers=Array.from(
-  f.getAll('approver')
- ).map(String)
+  const approvers=Array.from(
+   f.getAll('approver')
+  ).map(String)
 
- const assignedTo=assigned.length
-  ? assigned
-  : space.members.map(m=>m.memberId)
+  const assignedTo=assigned.length
+   ? assigned
+   : space.members.map(m=>m.memberId)
 
- const activityId=crypto.randomUUID()
+  const activityId=crypto.randomUUID()
 
- const a:Activity={
-  id:activityId,
-  spaceId:space.id,
-  name:String(f.get('name')),
-  icon:String(f.get('icon')||'✨'),
-  category:String(f.get('category')),
-  points:Number(f.get('points')),
-  recurrence:String(f.get('recurrence')),
-  status:'open',
-  visibility:String(f.get('visibility')) as Visibility,
-  assignedTo,
-  completionMode:
-   String(f.get('completionMode')) as CompletionMode,
-  approval:f.get('approval')==='on',
-  approverIds:approvers,
-  proofMode:String(f.get('proof')) as ProofMode,
-  contributesToGoals:f.get('goals')==='on',
-  pointDestination:
-   String(f.get('pointDestination')||'personal') as
-    'personal'|'shared',
-  version:1,
-  createdBy:user.id
- }
-
- const {error:activityError}=await supabase
-  .from('activities')
-  .insert({
+  const a:Activity={
    id:activityId,
-   space_id:space.id,
-   name:a.name,
-   icon:a.icon,
-   category:a.category,
-   points:a.points,
-   recurrence:a.recurrence,
-   completion_mode:a.completionMode,
-  proof_mode:
- a.proofMode==='Required photo'
-  ? 'required_photo'
-  : a.proofMode==='Optional photo'
-   ? 'optional_photo'
-   : 'none',
-   require_approval:a.approval,
-   contributes_to_goals:a.contributesToGoals,
-   status:'active',
-   created_by:user.id,
-   point_destination:a.pointDestination,
-   visibility:a.visibility
-  })
+   spaceId:space.id,
+   name:String(f.get('name')),
+   icon:String(f.get('icon')||'✨'),
+   category:String(f.get('category')),
+   points:Number(f.get('points')),
+   recurrence:String(f.get('recurrence')),
+   status:'open',
+   visibility:String(f.get('visibility')) as Visibility,
+   assignedTo,
+   completionMode:
+    String(f.get('completionMode')) as CompletionMode,
+   approval:f.get('approval')==='on',
+   approverIds:approvers,
+   proofMode:String(f.get('proof')) as ProofMode,
+   contributesToGoals:f.get('goals')==='on',
+   pointDestination:
+    String(f.get('pointDestination')||'personal') as
+     'personal'|'shared',
+   version:1,
+   createdBy:user.id
+  }
 
- if(activityError){
-  console.error('Unable to create activity:',activityError)
-  note('Unable to add activity.')
-  return
- }
+  const {error:activityError}=await supabase
+   .from('activities')
+   .insert({
+    id:activityId,
+    space_id:space.id,
+    name:a.name,
+    icon:a.icon,
+    category:a.category,
+    points:a.points,
+    recurrence:a.recurrence,
+    completion_mode:a.completionMode,
+    proof_mode:
+     a.proofMode==='Required photo'
+      ? 'required_photo'
+      : a.proofMode==='Optional photo'
+       ? 'optional_photo'
+       : 'none',
+    require_approval:a.approval,
+    contributes_to_goals:a.contributesToGoals,
+    status:'active',
+    created_by:user.id,
+    point_destination:a.pointDestination,
+    visibility:a.visibility
+   })
 
- const {error:assignmentError}=await supabase
-  .from('activity_assignments')
-  .insert(
-   assignedTo.map(userId=>({
-    activity_id:activityId,
-    user_id:userId
-   }))
-  )
+  if(activityError){
+   console.error('Unable to create activity:',activityError)
+   note('Unable to add activity.')
+   return
+  }
 
- if(assignmentError){
-  console.error(
-   'Unable to save activity assignments:',
-   assignmentError
-  )
-  note('Activity created, but assignments could not be saved.')
-  return
- }
-
- if(approvers.length>0){
-  const {error:approverError}=await supabase
-   .from('activity_approvers')
+  const {error:assignmentError}=await supabase
+   .from('activity_assignments')
    .insert(
-    approvers.map(userId=>({
+    assignedTo.map(userId=>({
      activity_id:activityId,
      user_id:userId
     }))
    )
 
-  if(approverError){
+  if(assignmentError){
    console.error(
-    'Unable to save activity approvers:',
-    approverError
+    'Unable to save activity assignments:',
+    assignmentError
    )
-   note('Activity created, but approvers could not be saved.')
+   note('Activity created, but assignments could not be saved.')
    return
   }
+
+  if(approvers.length>0){
+   const {error:approverError}=await supabase
+    .from('activity_approvers')
+    .insert(
+     approvers.map(userId=>({
+      activity_id:activityId,
+      user_id:userId
+     }))
+    )
+
+   if(approverError){
+    console.error(
+     'Unable to save activity approvers:',
+     approverError
+    )
+    note('Activity created, but approvers could not be saved.')
+    return
+   }
+  }
+
+  update({
+   ...data,
+   activities:[a,...data.activities]
+  })
+
+  form.reset()
+  setName('')
+  setRequireApproval(false)
+  note('Activity added.')
  }
-
- update({
-  ...data,
-  activities:[a,...data.activities]
- })
-
- form.reset()
- setName('')
- setRequireApproval(false)
- note('Activity added.')
-}
  const canManage=['Owner','Admin'].includes(roleFor(space,user.id)||'')
  return <>
   <section className="activity-hero"><div><p>✓ THIS PERIOD</p><h1>Activities</h1><span>Incomplete activities simply earn no points. No overdue penalties.</span></div><b>{activities.filter(a=>a.status==='complete').length}/{activities.filter(a=>a.status!=='paused'&&a.status!=='archived').length}</b></section>
