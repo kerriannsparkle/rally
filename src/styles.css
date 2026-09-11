@@ -2991,3 +2991,191 @@ legend{
  }
  .space-invitation-actions button{flex:1}
 }
+
+/* Rally 9 recurrence + completion rules */
+.recurrence-main-row{
+  align-items:end;
+}
+
+.recurrence-builder{
+  display:grid;
+  gap:14px;
+  padding:16px;
+  border:1px solid rgba(72,54,113,.12);
+  border-radius:18px;
+  background:rgba(250,248,255,.78);
+}
+
+.field-label{
+  display:block;
+  font-size:.78rem;
+  font-weight:800;
+  letter-spacing:.02em;
+  color:var(--muted, #6f687c);
+}
+
+.weekday-picker{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+.weekday-picker button{
+  width:40px;
+  height:40px;
+  border-radius:999px;
+  border:1px solid rgba(72,54,113,.16);
+  background:#fff;
+  font-weight:800;
+  cursor:pointer;
+}
+
+.weekday-picker button.selected{
+  border-color:rgba(103,76,184,.48);
+  background:rgba(103,76,184,.12);
+  box-shadow:0 0 0 2px rgba(103,76,184,.06);
+}
+
+.compact-number-field{
+  display:grid;
+  gap:7px;
+  max-width:360px;
+}
+
+.compact-number-field input{
+  max-width:130px;
+}
+
+.compact-number-field small,
+.recurrence-builder label small{
+  color:var(--muted, #746d80);
+  line-height:1.4;
+}
+
+.custom-recurrence{
+  display:grid;
+  gap:14px;
+}
+
+.custom-repeat-row{
+  display:grid;
+  grid-template-columns:auto 90px minmax(120px,180px);
+  gap:10px;
+  align-items:center;
+}
+
+.custom-repeat-row .field-label{
+  margin:0;
+}
+
+.recurrence-method{
+  display:grid;
+  gap:9px;
+  margin:0;
+  padding:0;
+  border:0;
+}
+
+.recurrence-method legend{
+  margin-bottom:8px;
+  font-weight:800;
+}
+
+.recurrence-method label{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  padding:12px 13px;
+  border:1px solid rgba(72,54,113,.12);
+  border-radius:14px;
+  background:#fff;
+  cursor:pointer;
+}
+
+.recurrence-method label.selected{
+  border-color:rgba(103,76,184,.42);
+  background:rgba(103,76,184,.07);
+}
+
+.recurrence-method label span{
+  display:grid;
+  gap:3px;
+}
+
+.recurrence-method label small{
+  color:var(--muted, #746d80);
+}
+
+.recurrence-preview{
+  display:flex;
+  gap:10px;
+  align-items:flex-start;
+  padding:12px 13px;
+  border-radius:14px;
+  background:rgba(42,170,151,.08);
+  border:1px solid rgba(42,170,151,.15);
+}
+
+.recurrence-preview>span{
+  font-size:1.05rem;
+}
+
+.recurrence-preview>div{
+  display:grid;
+  gap:2px;
+}
+
+.recurrence-preview strong{
+  font-size:.9rem;
+}
+
+.recurrence-preview small{
+  color:var(--muted, #746d80);
+  line-height:1.35;
+}
+
+.rally9-activity.not-due{
+  opacity:.78;
+}
+
+.next-available{
+  font-weight:700;
+  color:var(--muted, #746d80);
+}
+
+.not-due-label{
+  display:inline-flex;
+  align-items:center;
+  min-height:36px;
+  padding:0 12px;
+  border-radius:999px;
+  background:rgba(72,54,113,.06);
+  color:var(--muted, #746d80);
+  font-size:.78rem;
+  font-weight:800;
+  white-space:nowrap;
+}
+
+.approval-points{
+  color:var(--muted, #746d80);
+  font-weight:700;
+}
+
+@media (max-width:640px){
+  .custom-repeat-row{
+    grid-template-columns:1fr 80px minmax(110px,1fr);
+  }
+
+  .custom-repeat-row .field-label{
+    grid-column:1 / -1;
+  }
+
+  .weekday-picker{
+    gap:6px;
+  }
+
+  .weekday-picker button{
+    width:36px;
+    height:36px;
+  }
+}

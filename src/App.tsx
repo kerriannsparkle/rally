@@ -11,6 +11,12 @@ type ActivityStatus='open'|'pending'|'complete'|'paused'|'archived'
 type Visibility='space'|'private'|'selected'
 type ProofMode='None'|'Optional photo'|'Required photo'
 type CompletionMode='shared_once'|'per_member'
+type RecurrenceUnit='day'|'week'|'month'
+type RecurrenceConfig=
+ | {v:2;kind:'once';anchor:string}
+ | {v:2;kind:'interval';unit:RecurrenceUnit;interval:number;target:number;anchor:string}
+ | {v:2;kind:'weekdays';interval:number;weekdays:number[];anchor:string}
+ | {v:2;kind:'monthday';interval:number;day:number;anchor:string}
 type NotificationPref={leaderboard:boolean;approvals:boolean;milestones:boolean;tiers:boolean;daily:boolean;community:boolean}
 
 type Member={id:string;name:string;avatar?:string;globalLifetime:number;tier:string}
@@ -20,7 +26,8 @@ type Activity={
  status:ActivityStatus;visibility:Visibility;visibleTo?:string[];assignedTo:string[];completionMode:CompletionMode;
  approval:boolean;approverIds:string[];proofMode:ProofMode;proofUrl?:string;completedBy?:string;completedAt?:string;
  contributesToGoals:boolean;pointDestination?:'personal'|'shared';version:number;createdBy:string;
- createdAt?:string;periodProgress?:number;periodTarget?:number;periodLabel?:string
+ createdAt?:string;periodProgress?:number;periodTarget?:number;periodLabel?:string;
+ recurrenceLabel?:string;isAvailableNow?:boolean;nextAvailableLabel?:string;approvalPending?:boolean;approvalPendingBy?:string;approvalProofUrl?:string
 }
 type Treat={id:string;spaceId:string;name:string;icon:string;description:string;points:number;assignedTo:string[];priorityFor:string[];status:'locked'|'obtained'|'archived';obtainedBy?:string;obtainedAt?:string}
 type Goal={id:string;spaceId:string;name:string;icon:string;target:number;progress:number;status:'active'|'reached'|'celebrated'|'archived';contributionMode:'space_only'|'selected';allowedSpaceIds:string[]}
@@ -138,87 +145,300 @@ const localDateKey=(date:Date)=>{
  return `${year}-${month}-${day}`
 }
 
+const safeInt=(value:number,min=1,max=999)=>Math.max(min,Math.min(max,Math.round(value||min)))
+const R9_RECURRENCE_PREFIX='r9:'
+const WEEKDAY_LABELS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+
+const zonedDateKey=(date=new Date(),timezone='UTC')=>{
+ try{
+  const parts=new Intl.DateTimeFormat('en-US',{
+   timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit'
+  }).formatToParts(date)
+  const get=(type:string)=>parts.find(part=>part.type===type)?.value||''
+  return `${get('year')}-${get('month')}-${get('day')}`
+ }catch{
+  return date.toISOString().slice(0,10)
+ }
+}
+
+const dayNumberForKey=(key:string)=>{
+ const [year,month,day]=key.split('-').map(Number)
+ return Math.floor(Date.UTC(year,month-1,day)/86400000)
+}
+
+const keyForDayNumber=(value:number)=>new Date(value*86400000).toISOString().slice(0,10)
+const addDaysToKey=(key:string,days:number)=>keyForDayNumber(dayNumberForKey(key)+days)
+const weekdayForKey=(key:string)=>new Date(`${key}T00:00:00Z`).getUTCDay()
+const mondayForKey=(key:string)=>addDaysToKey(key,-((weekdayForKey(key)+6)%7))
+const monthIndexForKey=(key:string)=>{
+ const [year,month]=key.split('-').map(Number)
+ return year*12+(month-1)
+}
+const monthPartsFromIndex=(index:number)=>({year:Math.floor(index/12),month:(index%12)+1})
+const daysInMonth=(year:number,month:number)=>new Date(Date.UTC(year,month,0)).getUTCDate()
+const keyForMonthDay=(monthIndex:number,day:number)=>{
+ const {year,month}=monthPartsFromIndex(monthIndex)
+ const safeDay=Math.min(Math.max(1,day),daysInMonth(year,month))
+ return `${year}-${String(month).padStart(2,'0')}-${String(safeDay).padStart(2,'0')}`
+}
+const friendlyDateKey=(key:string)=>new Intl.DateTimeFormat('en-US',{
+ weekday:'short',month:'short',day:'numeric',timeZone:'UTC'
+}).format(new Date(`${key}T12:00:00Z`))
+const ordinal=(value:number)=>{
+ const mod100=value%100
+ if(mod100>=11&&mod100<=13) return `${value}th`
+ if(value%10===1) return `${value}st`
+ if(value%10===2) return `${value}nd`
+ if(value%10===3) return `${value}rd`
+ return `${value}th`
+}
+
+const serializeRecurrence=(config:RecurrenceConfig)=>`${R9_RECURRENCE_PREFIX}${JSON.stringify(config)}`
+const isStructuredRecurrence=(recurrence:string)=>recurrence.trim().startsWith(R9_RECURRENCE_PREFIX)
+
+const parseStructuredRecurrence=(recurrence:string):RecurrenceConfig|null=>{
+ if(!isStructuredRecurrence(recurrence)) return null
+ try{
+  const parsed=JSON.parse(recurrence.trim().slice(R9_RECURRENCE_PREFIX.length)) as RecurrenceConfig
+  if(parsed?.v!==2||!parsed.kind||!parsed.anchor) return null
+  if(parsed.kind==='once') return parsed
+  if(parsed.kind==='interval') return {
+   ...parsed,
+   interval:safeInt(parsed.interval),
+   target:safeInt(parsed.target,1,31)
+  }
+  if(parsed.kind==='weekdays') return {
+   ...parsed,
+   interval:safeInt(parsed.interval,1,52),
+   weekdays:[...new Set((parsed.weekdays||[]).filter(day=>day>=0&&day<=6))].sort()
+  }
+  if(parsed.kind==='monthday') return {
+   ...parsed,
+   interval:safeInt(parsed.interval,1,24),
+   day:safeInt(parsed.day,1,31)
+  }
+  return null
+ }catch{
+  return null
+ }
+}
+
 const recurrenceTarget=(recurrence:string)=>{
+ const config=parseStructuredRecurrence(recurrence)
+ if(config?.kind==='interval') return config.target
+ if(config) return 1
  const value=recurrence.toLowerCase()
- if(value==='3x/week') return 3
+ const perWeek=value.match(/^(\d+)x\/week$/)
+ const perMonth=value.match(/^(\d+)x\/month$/)
+ if(perWeek) return safeInt(Number(perWeek[1]),1,31)
+ if(perMonth) return safeInt(Number(perMonth[1]),1,31)
  if(value==='twice/month') return 2
  return 1
 }
 
-const periodKeyFor=(recurrence:string,date=new Date())=>{
+const recurrenceLabel=(recurrence:string)=>{
+ const config=parseStructuredRecurrence(recurrence)
+ if(!config) return recurrence
+ if(config.kind==='once') return 'One time'
+ if(config.kind==='weekdays'){
+  const days=config.weekdays.map(day=>WEEKDAY_LABELS[day]).join(', ')
+  return config.interval===1
+   ? days
+   : `Every ${config.interval} weeks · ${days}`
+ }
+ if(config.kind==='monthday'){
+  return config.interval===1
+   ? `Monthly on the ${ordinal(config.day)}`
+   : `Every ${config.interval} months on the ${ordinal(config.day)}`
+ }
+ const unit=config.unit
+ const interval=config.interval
+ const target=config.target
+ if(unit==='day'){
+  if(interval===1&&target===1) return 'Every day'
+  if(interval===1) return `${target}x per day`
+  if(target===1) return `Every ${interval} days`
+  return `${target} times every ${interval} days`
+ }
+ if(unit==='week'){
+  if(interval===1&&target===1) return 'Once per week'
+  if(interval===1) return `${target}x per week`
+  if(target===1) return `Every ${interval} weeks`
+  return `${target} times every ${interval} weeks`
+ }
+ if(interval===1&&target===1) return 'Once per month'
+ if(interval===1) return `${target}x per month`
+ if(target===1) return `Every ${interval} months`
+ return `${target} times every ${interval} months`
+}
+
+type RecurrenceState={
+ label:string;target:number;periodKey:string;available:boolean;nextAvailableLabel?:string
+}
+
+const structuredRecurrenceState=(config:RecurrenceConfig,timezone:string,date=new Date()):RecurrenceState=>{
+ const today=zonedDateKey(date,timezone)
+ const label=recurrenceLabel(serializeRecurrence(config))
+ if(config.kind==='once') return {label,target:1,periodKey:'once',available:true}
+
+ if(config.kind==='interval'){
+  const target=config.target
+  if(config.unit==='day'){
+   const diff=dayNumberForKey(today)-dayNumberForKey(config.anchor)
+   if(diff<0){
+    return {label,target,periodKey:`r9:day:${config.anchor}`,available:false,nextAvailableLabel:friendlyDateKey(config.anchor)}
+   }
+   const start=addDaysToKey(config.anchor,Math.floor(diff/config.interval)*config.interval)
+   return {label,target,periodKey:`r9:day:${start}:every:${config.interval}`,available:true}
+  }
+
+  if(config.unit==='week'){
+   const anchorWeek=mondayForKey(config.anchor)
+   const currentWeek=mondayForKey(today)
+   const diffWeeks=Math.floor((dayNumberForKey(currentWeek)-dayNumberForKey(anchorWeek))/7)
+   if(diffWeeks<0){
+    return {label,target,periodKey:`r9:week:${anchorWeek}`,available:false,nextAvailableLabel:friendlyDateKey(anchorWeek)}
+   }
+   const block=Math.floor(diffWeeks/config.interval)
+   const start=addDaysToKey(anchorWeek,block*config.interval*7)
+   return {label,target,periodKey:`r9:week:${start}:every:${config.interval}`,available:true}
+  }
+
+  const anchorMonth=monthIndexForKey(config.anchor)
+  const currentMonth=monthIndexForKey(today)
+  const diffMonths=currentMonth-anchorMonth
+  if(diffMonths<0){
+   return {label,target,periodKey:`r9:month:${anchorMonth}`,available:false,nextAvailableLabel:friendlyDateKey(config.anchor)}
+  }
+  const block=Math.floor(diffMonths/config.interval)
+  const startIndex=anchorMonth+block*config.interval
+  const {year,month}=monthPartsFromIndex(startIndex)
+  return {label,target,periodKey:`r9:month:${year}-${String(month).padStart(2,'0')}:every:${config.interval}`,available:true}
+ }
+
+ if(config.kind==='weekdays'){
+  const anchorWeek=mondayForKey(config.anchor)
+  const currentWeek=mondayForKey(today)
+  const diffWeeks=Math.floor((dayNumberForKey(currentWeek)-dayNumberForKey(anchorWeek))/7)
+  const activeWeek=diffWeeks>=0&&diffWeeks%config.interval===0
+  const available=activeWeek&&config.weekdays.includes(weekdayForKey(today))
+  let next:string|undefined
+  if(!available){
+   for(let offset=1;offset<=740;offset+=1){
+    const candidate=addDaysToKey(today,offset)
+    const candidateWeek=mondayForKey(candidate)
+    const weekDiff=Math.floor((dayNumberForKey(candidateWeek)-dayNumberForKey(anchorWeek))/7)
+    if(weekDiff>=0&&weekDiff%config.interval===0&&config.weekdays.includes(weekdayForKey(candidate))){
+     next=candidate
+     break
+    }
+   }
+  }
+  return {
+   label,target:1,periodKey:`r9:weekday:${today}`,available,
+   nextAvailableLabel:next?friendlyDateKey(next):undefined
+  }
+ }
+
+ const anchorMonth=monthIndexForKey(config.anchor)
+ const currentMonth=monthIndexForKey(today)
+ const diffMonths=currentMonth-anchorMonth
+ const activeMonth=diffMonths>=0&&diffMonths%config.interval===0
+ const dueKey=activeMonth?keyForMonthDay(currentMonth,config.day):''
+ const available=activeMonth&&today===dueKey
+ let next:string|undefined
+ if(!available){
+  const startOffset=Math.max(0,diffMonths)
+  for(let offset=0;offset<=60;offset+=1){
+   const monthIndex=currentMonth+offset
+   const monthDiff=monthIndex-anchorMonth
+   if(monthDiff<0||monthDiff%config.interval!==0) continue
+   const candidate=keyForMonthDay(monthIndex,config.day)
+   if(dayNumberForKey(candidate)>dayNumberForKey(today)){
+    next=candidate
+    break
+   }
+  }
+ }
+ return {
+  label,target:1,periodKey:`r9:monthday:${today}`,available,
+  nextAvailableLabel:next?friendlyDateKey(next):undefined
+ }
+}
+
+const legacyPeriodKeyFor=(recurrence:string,date:Date,timezone:string)=>{
  const value=recurrence.toLowerCase()
-
+ const today=zonedDateKey(date,timezone)
  if(value==='one time') return 'once'
-
- if(value==='every day'){
-  return `day:${localDateKey(date)}`
- }
-
- if(value==='every week'||value==='3x/week'){
-  const start=new Date(date)
-  const daysSinceMonday=(start.getDay()+6)%7
-  start.setHours(0,0,0,0)
-  start.setDate(start.getDate()-daysSinceMonday)
-  return `week:${localDateKey(start)}`
- }
-
+ if(value==='every day') return `day:${today}`
+ if(value==='every week'||value==='3x/week') return `week:${mondayForKey(today)}`
  if(value==='every other week'){
-  const start=new Date(date)
-  const daysSinceMonday=(start.getDay()+6)%7
-  start.setHours(0,0,0,0)
-  start.setDate(start.getDate()-daysSinceMonday)
-  const mondayNumber=Math.floor(start.getTime()/604800000)
+  const monday=mondayForKey(today)
+  const mondayNumber=Math.floor(dayNumberForKey(monday)/7)
   return `biweek:${Math.floor(mondayNumber/2)}`
  }
-
- if(value==='twice/month'){
-  return `month2:${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`
- }
-
- if(value==='every 90 days'){
-  const dayNumber=Math.floor(
-   Date.UTC(date.getFullYear(),date.getMonth(),date.getDate())/86400000
-  )
-  return `90-day:${Math.floor(dayNumber/90)}`
- }
-
- return `day:${localDateKey(date)}`
+ if(value==='twice/month') return `month2:${today.slice(0,7)}`
+ if(value==='every 90 days') return `90-day:${Math.floor(dayNumberForKey(today)/90)}`
+ return `day:${today}`
 }
 
-const periodKeyMatches=(recurrence:string,key:string,date=new Date())=>{
- const base=periodKeyFor(recurrence,date)
- const target=recurrenceTarget(recurrence)
-
- if(target===1) return key===base
- return key===base || key.startsWith(`${base}:`)
+const recurrenceState=(recurrence:string,timezone='UTC',date=new Date()):RecurrenceState=>{
+ const config=parseStructuredRecurrence(recurrence)
+ if(config) return structuredRecurrenceState(config,timezone,date)
+ return {
+  label:recurrenceLabel(recurrence),
+  target:recurrenceTarget(recurrence),
+  periodKey:legacyPeriodKeyFor(recurrence,date,timezone),
+  available:true
+ }
 }
 
-const nextPeriodKey=(recurrence:string,existingKeys:string[],date=new Date())=>{
- const base=periodKeyFor(recurrence,date)
- const target=recurrenceTarget(recurrence)
+const periodKeyFor=(recurrence:string,date=new Date(),timezone='UTC')=>recurrenceState(recurrence,timezone,date).periodKey
 
- if(target===1) return base
+const periodKeyMatches=(recurrence:string,key:string,date=new Date(),timezone='UTC')=>{
+ const state=recurrenceState(recurrence,timezone,date)
+ if(state.target===1) return key===state.periodKey
+ return key===state.periodKey||key.startsWith(`${state.periodKey}:`)
+}
 
+const nextPeriodKey=(recurrence:string,existingKeys:string[],date=new Date(),timezone='UTC')=>{
+ const state=recurrenceState(recurrence,timezone,date)
+ const base=state.periodKey
+ if(state.target===1) return base
  const used=new Set(existingKeys)
  if(!used.has(base)) return base
-
- for(let slot=2;slot<=target;slot+=1){
+ for(let slot=2;slot<=state.target;slot+=1){
   const key=`${base}:${slot}`
   if(!used.has(key)) return key
  }
-
- return `${base}:${target}`
+ return `${base}:${state.target}`
 }
 
 const recurrenceProgressLabel=(recurrence:string,progress:number,target:number)=>{
+ const config=parseStructuredRecurrence(recurrence)
+ if(target<=1) return recurrenceLabel(recurrence)
+ if(config?.kind==='interval'){
+  if(config.unit==='day'&&config.interval===1) return `${progress} of ${target} today`
+  if(config.unit==='week'&&config.interval===1) return `${progress} of ${target} this week`
+  if(config.unit==='month'&&config.interval===1) return `${progress} of ${target} this month`
+  return `${progress} of ${target} this period`
+ }
  const value=recurrence.toLowerCase()
- if(target<=1) return recurrence
  if(value==='3x/week') return `${progress} of ${target} this week`
  if(value==='twice/month') return `${progress} of ${target} this month`
  return `${progress} of ${target}`
 }
 
 const recurrencePriority=(recurrence:string)=>{
+ const config=parseStructuredRecurrence(recurrence)
+ if(config?.kind==='interval'){
+  if(config.unit==='day') return 0
+  if(config.unit==='week') return 2
+  return 4
+ }
+ if(config?.kind==='weekdays') return 1
+ if(config?.kind==='monthday') return 3
+ if(config?.kind==='once') return 5
  const value=recurrence.toLowerCase()
  if(value==='every day') return 0
  if(value==='3x/week') return 1
@@ -854,13 +1074,18 @@ useEffect(()=>{
     .filter(approver=>approver.activity_id===activity.id)
     .map(approver=>approver.user_id)
 
-   const target=recurrenceTarget(activity.recurrence || 'One time')
+   const activitySpace=appSpaces.find(space=>space.id===activity.space_id)
+   const timezone=activitySpace?.timezone||'UTC'
+   const recurrence=recurrenceState(activity.recurrence||'One time',timezone)
+   const target=recurrence.target
    const periodCompletions=activityCompletions.filter(
     completion=>
      completion.activity_id===activity.id &&
      periodKeyMatches(
       activity.recurrence || 'One time',
-      completion.period_key
+      completion.period_key,
+      new Date(),
+      timezone
      ) &&
      completion.approval_status!=='rejected'
    )
@@ -882,22 +1107,25 @@ useEffect(()=>{
     completion=>completion.approval_status==='pending'
    )
 
+   // Approval can happen after the original completion period has closed.
+   // Keep the latest pending approval actionable even on a later day/week.
    const pendingForApproval=approverIds.includes(authUser.id)
-    ? periodCompletions.find(
-       completion=>completion.approval_status==='pending'
+    ? activityCompletions.find(
+       completion=>
+        completion.activity_id===activity.id &&
+        completion.approval_status==='pending'
       )
     : undefined
 
    const latestEarned=earnedCompletions[0]
-   const latestCompletion=
-    pendingForApproval || ownPending || latestEarned
+   const latestCompletion=ownPending || latestEarned
 
    const progress=Math.min(target,earnedCompletions.length)
 
    const completionStatus:ActivityStatus=
     activity.status==='paused'||activity.status==='archived'
      ? activity.status as ActivityStatus
-     : pendingForApproval||ownPending
+     : ownPending
       ? 'pending'
       : progress>=target
        ? 'complete'
@@ -911,6 +1139,12 @@ useEffect(()=>{
     category:activity.category || 'General',
     points:activity.points ?? 0,
     recurrence:activity.recurrence || 'One time',
+    recurrenceLabel:recurrence.label,
+    isAvailableNow:recurrence.available,
+    nextAvailableLabel:recurrence.nextAvailableLabel,
+    approvalPending:Boolean(pendingForApproval),
+    approvalPendingBy:pendingForApproval?.completed_by || undefined,
+    approvalProofUrl:pendingForApproval?.proof_signed_url || undefined,
     status:completionStatus,
     completedBy:latestCompletion?.completed_by || undefined,
     completedAt:latestCompletion?.completed_at || undefined,
@@ -1163,6 +1397,27 @@ const [data,setData]=useState<AppData>(load)
  const [inviteOpen,setInviteOpen]=useState(false)
  const user=data.members.find(m=>m.id===data.currentUserId)!
  const spaces=data.spaces.filter(s=>s.members.some(m=>m.memberId===user.id))
+
+ useEffect(()=>{
+  if(!authUser) return
+
+  const refreshPeriods=()=>{
+   if(document.visibilityState==='visible'){
+    setAccountRefresh(value=>value+1)
+   }
+  }
+
+  window.addEventListener('focus',refreshPeriods)
+  document.addEventListener('visibilitychange',refreshPeriods)
+  const timer=window.setInterval(refreshPeriods,15*60*1000)
+
+  return ()=>{
+   window.removeEventListener('focus',refreshPeriods)
+   document.removeEventListener('visibilitychange',refreshPeriods)
+   window.clearInterval(timer)
+  }
+ },[authUser?.id])
+
  const activeSpace=spaceId==='all'?null:spaces.find(s=>s.id===spaceId)||spaces[0]
  const isSolo=activeSpace?.members.length===1
  const myRole=activeSpace?roleFor(activeSpace,user.id):undefined
@@ -1311,8 +1566,21 @@ const [data,setData]=useState<AppData>(load)
    return
   }
 
-  const target=recurrenceTarget(a.recurrence)
-  const basePeriodKey=periodKeyFor(a.recurrence)
+  const activitySpace=data.spaces.find(space=>space.id===a.spaceId)
+  const timezone=activitySpace?.timezone||'UTC'
+  const currentRecurrence=recurrenceState(a.recurrence,timezone)
+
+  if(!currentRecurrence.available){
+   note(
+    currentRecurrence.nextAvailableLabel
+     ? `This activity is next available ${currentRecurrence.nextAvailableLabel}.`
+     : 'This activity is not available right now.'
+   )
+   return
+  }
+
+  const target=currentRecurrence.target
+  const basePeriodKey=currentRecurrence.periodKey
 
   let existingQuery=supabase
    .from('activity_completions')
@@ -1367,7 +1635,9 @@ const [data,setData]=useState<AppData>(load)
 
   const periodKey=nextPeriodKey(
    a.recurrence,
-   liveCompletions.map(completion=>completion.period_key)
+   liveCompletions.map(completion=>completion.period_key),
+   new Date(),
+   timezone
   )
 
   const {data:completion,error:completionError}=await supabase
@@ -1621,7 +1891,8 @@ const [data,setData]=useState<AppData>(load)
          a.recurrence,
          nextProgress,
          target
-        )
+        ),
+        approvalPending:false
        }
      : x
    ),
@@ -1657,8 +1928,11 @@ const [data,setData]=useState<AppData>(load)
   if(a.status!=='complete'||!a.completedBy) return
 
   const who=a.completedBy
-  const target=a.periodTarget || recurrenceTarget(a.recurrence)
-  const basePeriodKey=periodKeyFor(a.recurrence)
+  const activitySpace=data.spaces.find(space=>space.id===a.spaceId)
+  const timezone=activitySpace?.timezone||'UTC'
+  const currentRecurrence=recurrenceState(a.recurrence,timezone)
+  const target=currentRecurrence.target
+  const basePeriodKey=currentRecurrence.periodKey
 
   let completionQuery=supabase
    .from('activity_completions')
@@ -1872,22 +2146,13 @@ const [data,setData]=useState<AppData>(load)
  }
 
  const approve=async(a:Activity)=>{
-  if(a.status!=='pending'||!a.approverIds.includes(user.id)) return
+  if(!a.approvalPending||!a.approverIds.includes(user.id)) return
 
-  const target=a.periodTarget || recurrenceTarget(a.recurrence)
-  const basePeriodKey=periodKeyFor(a.recurrence)
-
-  let completionQuery=supabase
+  const {data:completion,error:completionError}=await supabase
    .from('activity_completions')
    .select('id, completed_by, completed_at, period_key')
    .eq('activity_id',a.id)
    .eq('approval_status','pending')
-
-  completionQuery=target>1
-   ? completionQuery.like('period_key',`${basePeriodKey}%`)
-   : completionQuery.eq('period_key',basePeriodKey)
-
-  const {data:completion,error:completionError}=await completionQuery
    .order('completed_at',{ascending:false})
    .limit(1)
    .maybeSingle()
@@ -1929,22 +2194,13 @@ const [data,setData]=useState<AppData>(load)
  }
 
  const sendBack=async(a:Activity)=>{
-  if(a.status!=='pending'||!a.approverIds.includes(user.id)) return
+  if(!a.approvalPending||!a.approverIds.includes(user.id)) return
 
-  const target=a.periodTarget || recurrenceTarget(a.recurrence)
-  const basePeriodKey=periodKeyFor(a.recurrence)
-
-  let completionQuery=supabase
+  const {data:completion,error:completionError}=await supabase
    .from('activity_completions')
    .select('id, completed_by, period_key')
    .eq('activity_id',a.id)
    .eq('approval_status','pending')
-
-  completionQuery=target>1
-   ? completionQuery.like('period_key',`${basePeriodKey}%`)
-   : completionQuery.eq('period_key',basePeriodKey)
-
-  const {data:completion,error:completionError}=await completionQuery
    .order('completed_at',{ascending:false})
    .limit(1)
    .maybeSingle()
@@ -1993,6 +2249,7 @@ const [data,setData]=useState<AppData>(load)
      ? {
         ...x,
         status:progress>=(a.periodTarget || 1)?'complete':'open',
+        approvalPending:false,
         completedBy:undefined,
         completedAt:undefined,
         proofUrl:undefined
@@ -2008,6 +2265,7 @@ const [data,setData]=useState<AppData>(load)
 
   note('Activity sent back.')
  }
+
  if (!sessionChecked || (authenticated&&!accountLoaded)) {
   return <div className="auth-loading">Loading Rally...</div>
 }
@@ -2356,6 +2614,7 @@ function GlobalHome({data,user,spaces,activities,complete,approve,sendBack,respo
  const ready=activities
   .filter(a=>
    a.status==='open' &&
+   a.isAvailableNow!==false &&
    (a.assignedTo.length===0||a.assignedTo.includes(user.id))
   )
   .sort((a,b)=>
@@ -2364,7 +2623,7 @@ function GlobalHome({data,user,spaces,activities,complete,approve,sendBack,respo
   )
 
  const approvals=activities.filter(a=>
-  a.status==='pending'&&a.approverIds.includes(user.id)
+  Boolean(a.approvalPending)&&a.approverIds.includes(user.id)
  )
  const pendingInvites=data.pendingInvites||[]
  const attentionCount=approvals.length+pendingInvites.length
@@ -2528,6 +2787,7 @@ function GlobalHome({data,user,spaces,activities,complete,approve,sendBack,respo
      const readyCount=data.activities.filter(a=>
       a.spaceId===space.id&&
       a.status==='open'&&
+      a.isAvailableNow!==false&&
       (a.assignedTo.length===0||a.assignedTo.includes(user.id))
      ).length
      const rank=space.members.length>1
@@ -2628,11 +2888,11 @@ function GlobalActivities({data,user,spaces,activities,complete,approve,sendBack
   .filter(activity=>rallyFilter==='all'||activity.spaceId===rallyFilter)
   .filter(activity=>{
    if(statusFilter==='ready'){
-    return activity.status==='open'&&(
+    return activity.status==='open'&&activity.isAvailableNow!==false&&(
      activity.assignedTo.length===0||activity.assignedTo.includes(user.id)
     )
    }
-   if(statusFilter==='waiting') return activity.status==='pending'
+   if(statusFilter==='waiting') return activity.status==='pending'||(Boolean(activity.approvalPending)&&activity.approverIds.includes(user.id))
    if(statusFilter==='done') return activity.status==='complete'
    return activity.status!=='archived'
   })
@@ -2728,8 +2988,9 @@ function GlobalActivities({data,user,spaces,activities,complete,approve,sendBack
 
 function ActivityCard({a,data,user,complete,approve,sendBack,showSpace=false}:{a:Activity;data:AppData;user:Member;complete:(a:Activity)=>void;approve?:(a:Activity)=>void;sendBack?:(a:Activity)=>void;showSpace?:boolean}){
  const space=data.spaces.find(s=>s.id===a.spaceId)
- const canApprove=a.status==='pending'&&a.approverIds.includes(user.id)
+ const canApprove=Boolean(a.approvalPending)&&a.approverIds.includes(user.id)
  const isAssigned=a.assignedTo.length===0||a.assignedTo.includes(user.id)
+ const availableNow=a.isAvailableNow!==false
  const mySpaceRole=space?.members.find(m=>m.memberId===user.id)?.role
 
  const canUndo=
@@ -2751,7 +3012,11 @@ function ActivityCard({a,data,user,complete,approve,sendBack,showSpace=false}:{a
    ? 'Add proof & complete'
    : `Complete +${a.points}`
 
- return <article className={`activity rally9-activity ${a.status}`}>
+ const approvalMember=a.approvalPendingBy
+  ? memberName(data,a.approvalPendingBy)
+  : 'They'
+
+ return <article className={`activity rally9-activity ${a.status} ${!availableNow&&a.status==='open'?'not-due':''}`}>
   <span className="activity-icon">{a.icon}</span>
   <div className="activity-copy">
    <div className="activity-title-row">
@@ -2760,12 +3025,15 @@ function ActivityCard({a,data,user,complete,approve,sendBack,showSpace=false}:{a
    </div>
    <small>{a.category} · {a.points} pts</small>
    <small className="activity-period">
-    {target>1?a.periodLabel:a.recurrence}
+    {a.periodLabel||a.recurrenceLabel||recurrenceLabel(a.recurrence)}
    </small>
    {target>1&&
     <div className="mini-progress-wrap">
      <Progress value={progress} max={target}/>
     </div>
+   }
+   {!availableNow&&a.status==='open'&&a.nextAvailableLabel&&
+    <small className="next-available">Next available {a.nextAvailableLabel}</small>
    }
    {!isAssigned&&a.status==='open'&&assignedNames.length>0&&
     <small className="assignment-note">For {assignedNames.join(', ')}</small>
@@ -2773,21 +3041,28 @@ function ActivityCard({a,data,user,complete,approve,sendBack,showSpace=false}:{a
    {a.status==='complete'&&a.completedBy&&space&&space.members.length>1&&
     <small>Completed by {memberName(data,a.completedBy)}</small>
    }
+   {canApprove&&
+    <small className="approval-points">{approvalMember} will earn +{a.points} points when approved.</small>
+   }
   </div>
 
   <div className="activity-actions">
-   {a.status==='open'&&isAssigned&&
+   {a.status==='open'&&isAssigned&&availableNow&&
     <button className="primary completion-button" onClick={()=>complete(a)}>
      {completionText}
     </button>
    }
 
+   {a.status==='open'&&isAssigned&&!availableNow&&
+    <span className="not-due-label">Not due today</span>
+   }
+
    {canApprove&&<>
     <button className="primary completion-button" onClick={()=>approve?.(a)}>
-     Approve +{a.points}
+     Approve
     </button>
-    {a.proofUrl&&
-     <button className="secondary" onClick={()=>window.open(a.proofUrl,'_blank')}>
+    {a.approvalProofUrl&&
+     <button className="secondary" onClick={()=>window.open(a.approvalProofUrl,'_blank')}>
       View proof
      </button>
     }
@@ -2824,7 +3099,77 @@ function AddActivityForm({data,space,user,update,note}:{data:AppData;space:Space
  const [requireApproval,setRequireApproval]=useState(false)
  const [assignees,setAssignees]=useState<string[]>([user.id])
  const [completionMode,setCompletionMode]=useState<CompletionMode>('per_member')
+ const [recurrenceAnchor]=useState(()=>zonedDateKey(new Date(),space.timezone))
+ const startingWeekday=weekdayForKey(recurrenceAnchor)
+ const startingMonthDay=Number(recurrenceAnchor.slice(-2))
+ const [frequency,setFrequency]=useState<'once'|'daily'|'weekdays'|'times-week'|'weekly'|'monthly'|'custom'>('daily')
+ const [selectedWeekdays,setSelectedWeekdays]=useState<number[]>([startingWeekday])
+ const [weeklyCount,setWeeklyCount]=useState(3)
+ const [weeklyDay,setWeeklyDay]=useState(startingWeekday)
+ const [monthlyDay,setMonthlyDay]=useState(startingMonthDay)
+ const [customInterval,setCustomInterval]=useState(2)
+ const [customUnit,setCustomUnit]=useState<RecurrenceUnit>('week')
+ const [customTarget,setCustomTarget]=useState(1)
+ const [customMode,setCustomMode]=useState<'count'|'weekdays'>('count')
+ const [customWeekdays,setCustomWeekdays]=useState<number[]>([startingWeekday])
  const points=suggestedPoints(name,category)
+ const activeGoals=data.goals.filter(goal=>goal.spaceId===space.id&&goal.status==='active')
+ const weekdayOrder=[1,2,3,4,5,6,0]
+
+ const recurrenceValue=useMemo(()=>{
+  if(frequency==='once'){
+   return serializeRecurrence({v:2,kind:'once',anchor:recurrenceAnchor})
+  }
+  if(frequency==='daily'){
+   return serializeRecurrence({v:2,kind:'interval',unit:'day',interval:1,target:1,anchor:recurrenceAnchor})
+  }
+  if(frequency==='weekdays'){
+   return serializeRecurrence({v:2,kind:'weekdays',interval:1,weekdays:selectedWeekdays,anchor:recurrenceAnchor})
+  }
+  if(frequency==='times-week'){
+   return serializeRecurrence({v:2,kind:'interval',unit:'week',interval:1,target:safeInt(weeklyCount,1,31),anchor:recurrenceAnchor})
+  }
+  if(frequency==='weekly'){
+   return serializeRecurrence({v:2,kind:'weekdays',interval:1,weekdays:[weeklyDay],anchor:recurrenceAnchor})
+  }
+  if(frequency==='monthly'){
+   return serializeRecurrence({v:2,kind:'monthday',interval:1,day:safeInt(monthlyDay,1,31),anchor:recurrenceAnchor})
+  }
+  if(customUnit==='week'&&customMode==='weekdays'){
+   const todayIndex=weekdayOrder.indexOf(startingWeekday)
+   const hasDayLeftThisWeek=customWeekdays.some(day=>weekdayOrder.indexOf(day)>=todayIndex)
+   const scheduleAnchor=customInterval>1&&!hasDayLeftThisWeek
+    ? addDaysToKey(recurrenceAnchor,7)
+    : recurrenceAnchor
+   return serializeRecurrence({
+    v:2,kind:'weekdays',interval:safeInt(customInterval,1,52),weekdays:customWeekdays,anchor:scheduleAnchor
+   })
+  }
+  return serializeRecurrence({
+   v:2,
+   kind:'interval',
+   unit:customUnit,
+   interval:safeInt(customInterval,1,365),
+   target:safeInt(customTarget,1,31),
+   anchor:recurrenceAnchor
+  })
+ },[
+  frequency,recurrenceAnchor,selectedWeekdays,weeklyCount,weeklyDay,monthlyDay,
+  customUnit,customMode,customInterval,customTarget,customWeekdays
+ ])
+
+ const resetRecurrence=()=>{
+  setFrequency('daily')
+  setSelectedWeekdays([startingWeekday])
+  setWeeklyCount(3)
+  setWeeklyDay(startingWeekday)
+  setMonthlyDay(startingMonthDay)
+  setCustomInterval(2)
+  setCustomUnit('week')
+  setCustomTarget(1)
+  setCustomMode('count')
+  setCustomWeekdays([startingWeekday])
+ }
 
  useEffect(()=>{
   setAssignees([user.id])
@@ -2838,6 +3183,16 @@ function AddActivityForm({data,space,user,update,note}:{data:AppData;space:Space
     ? current.filter(memberId=>memberId!==id)
     : [...current,id]
   )
+ }
+
+ const toggleWeekday=(day:number,custom=false)=>{
+  const setter=custom?setCustomWeekdays:setSelectedWeekdays
+  setter(current=>{
+   if(current.includes(day)){
+    return current.length===1?current:current.filter(value=>value!==day)
+   }
+   return [...current,day].sort((a,b)=>weekdayOrder.indexOf(a)-weekdayOrder.indexOf(b))
+  })
  }
 
  const add=async(e:FormEvent<HTMLFormElement>)=>{
@@ -2868,6 +3223,8 @@ function AddActivityForm({data,space,user,update,note}:{data:AppData;space:Space
     ? String(f.get('pointDestination')||'personal') as 'personal'|'shared'
     : 'personal'
 
+  const savedRecurrence=String(f.get('recurrence'))
+  const recurrence=recurrenceState(savedRecurrence,space.timezone)
   const activityId=crypto.randomUUID()
   const a:Activity={
    id:activityId,
@@ -2876,7 +3233,10 @@ function AddActivityForm({data,space,user,update,note}:{data:AppData;space:Space
    icon:String(f.get('icon')||'✨'),
    category:String(f.get('category')||'Other'),
    points:Number(f.get('points')),
-   recurrence:String(f.get('recurrence')),
+   recurrence:savedRecurrence,
+   recurrenceLabel:recurrence.label,
+   isAvailableNow:recurrence.available,
+   nextAvailableLabel:recurrence.nextAvailableLabel,
    status:'open',
    visibility:String(f.get('visibility')) as Visibility,
    assignedTo,
@@ -2890,12 +3250,8 @@ function AddActivityForm({data,space,user,update,note}:{data:AppData;space:Space
    createdBy:user.id,
    createdAt:new Date().toISOString(),
    periodProgress:0,
-   periodTarget:recurrenceTarget(String(f.get('recurrence'))),
-   periodLabel:recurrenceProgressLabel(
-    String(f.get('recurrence')),
-    0,
-    recurrenceTarget(String(f.get('recurrence')))
-   )
+   periodTarget:recurrence.target,
+   periodLabel:recurrenceProgressLabel(savedRecurrence,0,recurrence.target)
   }
 
   const {error:activityError}=await supabase
@@ -2970,6 +3326,7 @@ function AddActivityForm({data,space,user,update,note}:{data:AppData;space:Space
   setAssignees([user.id])
   setCompletionMode('per_member')
   setRequireApproval(false)
+  resetRecurrence()
   note('Activity added.')
  }
 
@@ -2999,17 +3356,19 @@ function AddActivityForm({data,space,user,update,note}:{data:AppData;space:Space
    </label>
   </div>
 
-  <div className="two">
+  <input type="hidden" name="recurrence" value={recurrenceValue}/>
+
+  <div className="two recurrence-main-row">
    <label>
     How often?
-    <select name="recurrence" defaultValue="Every day">
-     <option>Every day</option>
-     <option>Every week</option>
-     <option>3x/week</option>
-     <option>Every other week</option>
-     <option>Twice/month</option>
-     <option>Every 90 days</option>
-     <option>One time</option>
+    <select value={frequency} onChange={e=>setFrequency(e.target.value as typeof frequency)}>
+     <option value="once">One time</option>
+     <option value="daily">Every day</option>
+     <option value="weekdays">Certain days</option>
+     <option value="times-week">X times per week</option>
+     <option value="weekly">Weekly</option>
+     <option value="monthly">Monthly</option>
+     <option value="custom">Custom</option>
     </select>
    </label>
    <label>
@@ -3018,6 +3377,128 @@ function AddActivityForm({data,space,user,update,note}:{data:AppData;space:Space
      {POINT_OPTIONS.map(point=><option value={point} key={point}>{point} points</option>)}
     </select>
    </label>
+  </div>
+
+  <div className="recurrence-builder">
+   {frequency==='weekdays'&&<>
+    <span className="field-label">Repeat on</span>
+    <div className="weekday-picker" aria-label="Days of week">
+     {weekdayOrder.map(day=>
+      <button
+       type="button"
+       key={day}
+       className={selectedWeekdays.includes(day)?'selected':''}
+       onClick={()=>toggleWeekday(day)}
+      >
+       {WEEKDAY_LABELS[day].slice(0,2)}
+      </button>
+     )}
+    </div>
+   </>}
+
+   {frequency==='times-week'&&
+    <label className="compact-number-field">
+     How many times each week?
+     <input
+      type="number"
+      min="1"
+      max="31"
+      value={weeklyCount}
+      onChange={e=>setWeeklyCount(safeInt(Number(e.target.value),1,31))}
+     />
+     <small>Complete it any {weeklyCount} {weeklyCount===1?'time':'times'} during the week.</small>
+    </label>
+   }
+
+   {frequency==='weekly'&&
+    <label>
+     On
+     <select value={weeklyDay} onChange={e=>setWeeklyDay(Number(e.target.value))}>
+      {weekdayOrder.map(day=><option value={day} key={day}>{WEEKDAY_LABELS[day]}</option>)}
+     </select>
+    </label>
+   }
+
+   {frequency==='monthly'&&
+    <label>
+     On day
+     <select value={monthlyDay} onChange={e=>setMonthlyDay(Number(e.target.value))}>
+      {Array.from({length:31},(_,index)=>index+1).map(day=><option value={day} key={day}>{ordinal(day)}</option>)}
+     </select>
+     <small>If that date doesn’t exist in a month, Rally uses the last day of that month.</small>
+    </label>
+   }
+
+   {frequency==='custom'&&<div className="custom-recurrence">
+    <div className="custom-repeat-row">
+     <span className="field-label">Repeat every</span>
+     <input
+      aria-label="Repeat interval"
+      type="number"
+      min="1"
+      max="365"
+      value={customInterval}
+      onChange={e=>setCustomInterval(safeInt(Number(e.target.value),1,365))}
+     />
+     <select value={customUnit} onChange={e=>{
+      const unit=e.target.value as RecurrenceUnit
+      setCustomUnit(unit)
+      if(unit!=='week') setCustomMode('count')
+     }}>
+      <option value="day">day{customInterval===1?'':'s'}</option>
+      <option value="week">week{customInterval===1?'':'s'}</option>
+      <option value="month">month{customInterval===1?'':'s'}</option>
+     </select>
+    </div>
+
+    {customUnit==='week'&&
+     <fieldset className="recurrence-method">
+      <legend>How should it work?</legend>
+      <label className={customMode==='count'?'selected':''}>
+       <input type="radio" checked={customMode==='count'} onChange={()=>setCustomMode('count')}/>
+       <span><strong>Complete it a certain number of times</strong><small>Any days during the period.</small></span>
+      </label>
+      <label className={customMode==='weekdays'?'selected':''}>
+       <input type="radio" checked={customMode==='weekdays'} onChange={()=>setCustomMode('weekdays')}/>
+       <span><strong>Use specific days</strong><small>Only those days can be completed.</small></span>
+      </label>
+     </fieldset>
+    }
+
+    {customUnit==='week'&&customMode==='weekdays'
+     ? <>
+       <span className="field-label">Repeat on</span>
+       <div className="weekday-picker" aria-label="Custom days of week">
+        {weekdayOrder.map(day=>
+         <button
+          type="button"
+          key={day}
+          className={customWeekdays.includes(day)?'selected':''}
+          onClick={()=>toggleWeekday(day,true)}
+         >
+          {WEEKDAY_LABELS[day].slice(0,2)}
+         </button>
+        )}
+       </div>
+      </>
+     : <label className="compact-number-field">
+       Completions per period
+       <input
+        type="number"
+        min="1"
+        max="31"
+        value={customTarget}
+        onChange={e=>setCustomTarget(safeInt(Number(e.target.value),1,31))}
+       />
+       <small>Use 1 for once per period, or more for goals like 3 times per day or 5 times per month.</small>
+      </label>
+    }
+   </div>}
+
+   <div className="recurrence-preview">
+    <span>↻</span>
+    <div><strong>{recurrenceLabel(recurrenceValue)}</strong><small>Missed periods close automatically and can’t be completed later.</small></div>
+   </div>
   </div>
 
   {!solo&&<fieldset className="assignment-fieldset">
@@ -3138,10 +3619,15 @@ function AddActivityForm({data,space,user,update,note}:{data:AppData;space:Space
      </fieldset>
     }
 
-    <label className="check">
-     <input type="checkbox" name="goals" defaultChecked/>
-     Let these points contribute to this Rally’s active goals
-    </label>
+    {activeGoals.length>0&&
+     <label className="check">
+      <input type="checkbox" name="goals" defaultChecked/>
+      {activeGoals.length===1
+       ? <>Count these points toward “{activeGoals[0].name}”</>
+       : <>Count these points toward Rally goals</>
+      }
+     </label>
+    }
    </div>
   </details>
 
@@ -3154,8 +3640,8 @@ function Activities({data,space,user,activities,complete,approve,sendBack,update
  const canManage=['Owner','Admin'].includes(roleFor(space,user.id)||'')
 
  const filtered=activities.filter(activity=>{
-  if(filter==='ready') return activity.status==='open'
-  if(filter==='waiting') return activity.status==='pending'
+  if(filter==='ready') return activity.status==='open'&&activity.isAvailableNow!==false
+  if(filter==='waiting') return activity.status==='pending'||(Boolean(activity.approvalPending)&&activity.approverIds.includes(user.id))
   if(filter==='done') return activity.status==='complete'
   return activity.status!=='archived'
  })
@@ -3228,12 +3714,13 @@ function SpaceHome({data,space,user,activities,complete,approve,sendBack,setScre
  const ready=activities
   .filter(activity=>
    activity.status==='open'&&
+   activity.isAvailableNow!==false&&
    (activity.assignedTo.length===0||activity.assignedTo.includes(user.id))
   )
   .sort((a,b)=>recurrencePriority(a.recurrence)-recurrencePriority(b.recurrence))
   .slice(0,4)
  const approvals=activities.filter(activity=>
-  activity.status==='pending'&&activity.approverIds.includes(user.id)
+  Boolean(activity.approvalPending)&&activity.approverIds.includes(user.id)
  )
  const priorityTreat=data.treats.find(treat=>
   treat.spaceId===space.id&&
@@ -3367,7 +3854,7 @@ function SpaceHome({data,space,user,activities,complete,approve,sendBack,setScre
 }
 
 function Leaderboard({data,space,user}:{data:AppData;space:Space;user:Member}){
- const leaders=[...space.members].sort((a,b)=>b.weekly-a.weekly);const max=Math.max(1,...leaders.map(x=>x.weekly));const me=leaders.find(x=>x.memberId===user.id)!;const leader=leaders[0];const catchup=Math.max(0,leader.weekly-me.weekly+1);const suggestion=data.activities.filter(a=>a.spaceId===space.id&&a.status==='open'&&a.assignedTo.includes(user.id)).sort((a,b)=>b.points-a.points)[0]
+ const leaders=[...space.members].sort((a,b)=>b.weekly-a.weekly);const max=Math.max(1,...leaders.map(x=>x.weekly));const me=leaders.find(x=>x.memberId===user.id)!;const leader=leaders[0];const catchup=Math.max(0,leader.weekly-me.weekly+1);const suggestion=data.activities.filter(a=>a.spaceId===space.id&&a.status==='open'&&a.isAvailableNow!==false&&a.assignedTo.includes(user.id)).sort((a,b)=>b.points-a.points)[0]
  return <><section className="race-hero"><div><p>🏁 WEEKLY RACE</p><h1>{leader.memberId===user.id?'You’re in first!':'Catch the leader'}</h1><span>{leader.memberId===user.id?`You’re ${leader.weekly-(leaders[1]?.weekly||0)} points ahead.`:`You need ${catchup} more points to take #1.`}</span></div><span className="trophy">🏆</span></section><section className="leaderboard">{leaders.map((m,i)=><article key={m.memberId} className={i===0?'winner':''}><span className="rank">{i===0?'👑':`#${i+1}`}</span><Avatar member={data.members.find(x=>x.id===m.memberId)!}/><div className="who"><strong>{memberName(data,m.memberId)}{m.memberId===user.id?' · You':''}</strong><small>{data.members.find(x=>x.id===m.memberId)?.tier} · {m.lifetime} space lifetime</small></div><div className="track"><i style={{width:`${Math.max(7,m.weekly/max*100)}%`}}/></div><b>{m.weekly} pts</b></article>)}</section>{leader.memberId!==user.id&&suggestion&&<section className="catchup"><span>⚡</span><div><strong>Fastest way to catch up</strong><p>Complete <b>{suggestion.name}</b> for +{suggestion.points} points.</p></div><button>Let’s go</button></section>}</>
 }
 
@@ -4305,7 +4792,7 @@ function SpaceSettings({data,space,user,update,note}:{data:AppData;space:Space;u
        <span className="activity-icon">{a.icon}</span>
        <div>
         <strong>{a.name}</strong>
-        <small>{a.category} · {a.points} points · {a.recurrence}</small>
+        <small>{a.category} · {a.points} points · {a.recurrenceLabel||recurrenceLabel(a.recurrence)}</small>
         <span className={`status-tag ${a.status}`}>{a.status}</span>
        </div>
       </div>
