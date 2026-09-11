@@ -19,7 +19,8 @@ type Activity={
  id:string;spaceId:string;name:string;icon:string;category:string;points:number;recurrence:string;
  status:ActivityStatus;visibility:Visibility;visibleTo?:string[];assignedTo:string[];completionMode:CompletionMode;
  approval:boolean;approverIds:string[];proofMode:ProofMode;proofUrl?:string;completedBy?:string;completedAt?:string;
- contributesToGoals:boolean;pointDestination?:'personal'|'shared';version:number;createdBy:string
+ contributesToGoals:boolean;pointDestination?:'personal'|'shared';version:number;createdBy:string;
+ createdAt?:string;periodProgress?:number;periodTarget?:number;periodLabel?:string
 }
 type Treat={id:string;spaceId:string;name:string;icon:string;description:string;points:number;assignedTo:string[];priorityFor:string[];status:'locked'|'obtained'|'archived';obtainedBy?:string;obtainedAt?:string}
 type Goal={id:string;spaceId:string;name:string;icon:string;target:number;progress:number;status:'active'|'reached'|'celebrated'|'archived';contributionMode:'space_only'|'selected';allowedSpaceIds:string[]}
@@ -135,6 +136,13 @@ const localDateKey=(date:Date)=>{
  return `${year}-${month}-${day}`
 }
 
+const recurrenceTarget=(recurrence:string)=>{
+ const value=recurrence.toLowerCase()
+ if(value==='3x/week') return 3
+ if(value==='twice/month') return 2
+ return 1
+}
+
 const periodKeyFor=(recurrence:string,date=new Date())=>{
  const value=recurrence.toLowerCase()
 
@@ -147,6 +155,7 @@ const periodKeyFor=(recurrence:string,date=new Date())=>{
  if(value==='every week'||value==='3x/week'){
   const start=new Date(date)
   const daysSinceMonday=(start.getDay()+6)%7
+  start.setHours(0,0,0,0)
   start.setDate(start.getDate()-daysSinceMonday)
   return `week:${localDateKey(start)}`
  }
@@ -154,14 +163,14 @@ const periodKeyFor=(recurrence:string,date=new Date())=>{
  if(value==='every other week'){
   const start=new Date(date)
   const daysSinceMonday=(start.getDay()+6)%7
+  start.setHours(0,0,0,0)
   start.setDate(start.getDate()-daysSinceMonday)
   const mondayNumber=Math.floor(start.getTime()/604800000)
   return `biweek:${Math.floor(mondayNumber/2)}`
  }
 
  if(value==='twice/month'){
-  const half=date.getDate()<=15?'1':'2'
-  return `half-month:${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${half}`
+  return `month2:${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`
  }
 
  if(value==='every 90 days'){
@@ -172,6 +181,50 @@ const periodKeyFor=(recurrence:string,date=new Date())=>{
  }
 
  return `day:${localDateKey(date)}`
+}
+
+const periodKeyMatches=(recurrence:string,key:string,date=new Date())=>{
+ const base=periodKeyFor(recurrence,date)
+ const target=recurrenceTarget(recurrence)
+
+ if(target===1) return key===base
+ return key===base || key.startsWith(`${base}:`)
+}
+
+const nextPeriodKey=(recurrence:string,existingKeys:string[],date=new Date())=>{
+ const base=periodKeyFor(recurrence,date)
+ const target=recurrenceTarget(recurrence)
+
+ if(target===1) return base
+
+ const used=new Set(existingKeys)
+ if(!used.has(base)) return base
+
+ for(let slot=2;slot<=target;slot+=1){
+  const key=`${base}:${slot}`
+  if(!used.has(key)) return key
+ }
+
+ return `${base}:${target}`
+}
+
+const recurrenceProgressLabel=(recurrence:string,progress:number,target:number)=>{
+ const value=recurrence.toLowerCase()
+ if(target<=1) return recurrence
+ if(value==='3x/week') return `${progress} of ${target} this week`
+ if(value==='twice/month') return `${progress} of ${target} this month`
+ return `${progress} of ${target}`
+}
+
+const recurrencePriority=(recurrence:string)=>{
+ const value=recurrence.toLowerCase()
+ if(value==='every day') return 0
+ if(value==='3x/week') return 1
+ if(value==='every week') return 2
+ if(value==='twice/month') return 3
+ if(value==='every other week') return 4
+ if(value==='every 90 days') return 5
+ return 6
 }
 
 const startOfCurrentWeek=()=>{
@@ -818,46 +871,54 @@ useEffect(()=>{
     .filter(approver=>approver.activity_id===activity.id)
     .map(approver=>approver.user_id)
 
-   const currentPeriodKey=periodKeyFor(
-    activity.recurrence || 'One time'
-   )
-
+   const target=recurrenceTarget(activity.recurrence || 'One time')
    const periodCompletions=activityCompletions.filter(
     completion=>
      completion.activity_id===activity.id &&
-     completion.period_key===currentPeriodKey &&
+     periodKeyMatches(
+      activity.recurrence || 'One time',
+      completion.period_key
+     ) &&
      completion.approval_status!=='rejected'
    )
 
-   let latestCompletion:any
-
-   if(activity.completion_mode==='per_member'){
-    const pendingForApproval=approverIds.includes(authUser.id)
-     ? periodCompletions.find(
-        completion=>completion.approval_status==='pending'
+   const completionsForProgress=
+    activity.completion_mode==='per_member'
+     ? periodCompletions.filter(
+        completion=>completion.completed_by===authUser.id
        )
-     : undefined
+     : periodCompletions
 
-    const ownCompletion=periodCompletions.find(
-     completion=>completion.completed_by===authUser.id
+   const earnedCompletions=completionsForProgress.filter(
+    completion=>['approved','not_required'].includes(
+     completion.approval_status
     )
+   )
 
-    latestCompletion=pendingForApproval || ownCompletion
-   }else{
-    latestCompletion=periodCompletions[0]
-   }
+   const ownPending=completionsForProgress.find(
+    completion=>completion.approval_status==='pending'
+   )
+
+   const pendingForApproval=approverIds.includes(authUser.id)
+    ? periodCompletions.find(
+       completion=>completion.approval_status==='pending'
+      )
+    : undefined
+
+   const latestEarned=earnedCompletions[0]
+   const latestCompletion=
+    pendingForApproval || ownPending || latestEarned
+
+   const progress=Math.min(target,earnedCompletions.length)
 
    const completionStatus:ActivityStatus=
     activity.status==='paused'||activity.status==='archived'
      ? activity.status as ActivityStatus
-     : latestCompletion
-      ? latestCompletion.approval_status==='pending'
-       ? 'pending'
-       : latestCompletion.approval_status==='approved' ||
-         latestCompletion.approval_status==='not_required'
-        ? 'complete'
-        : 'open'
-      : 'open'
+     : pendingForApproval||ownPending
+      ? 'pending'
+      : progress>=target
+       ? 'complete'
+       : 'open'
 
    return {
     id:activity.id,
@@ -868,14 +929,8 @@ useEffect(()=>{
     points:activity.points ?? 0,
     recurrence:activity.recurrence || 'One time',
     status:completionStatus,
-    completedBy:
-     completionStatus!=='open'
-      ? latestCompletion?.completed_by
-      : undefined,
-    completedAt:
-     completionStatus!=='open'
-      ? latestCompletion?.completed_at
-      : undefined,
+    completedBy:latestCompletion?.completed_by || undefined,
+    completedAt:latestCompletion?.completed_at || undefined,
     proofUrl:latestCompletion?.proof_signed_url || undefined,
     visibility:(activity.visibility || 'space') as Visibility,
     assignedTo,
@@ -895,7 +950,15 @@ useEffect(()=>{
      (activity.point_destination || 'personal') as
       'personal'|'shared',
     version:1,
-    createdBy:activity.created_by || authUser.id
+    createdBy:activity.created_by || authUser.id,
+    createdAt:activity.created_at || undefined,
+    periodProgress:progress,
+    periodTarget:target,
+    periodLabel:recurrenceProgressLabel(
+     activity.recurrence || 'One time',
+     progress,
+     target
+    )
    }
   })
 
@@ -1223,14 +1286,26 @@ const [data,setData]=useState<AppData>(load)
    a.status==='archived'
   ) return
 
-  const periodKey=periodKeyFor(a.recurrence)
+  const canComplete=
+   a.assignedTo.length===0 || a.assignedTo.includes(user.id)
+
+  if(!canComplete){
+   note('This activity is assigned to someone else.')
+   return
+  }
+
+  const target=recurrenceTarget(a.recurrence)
+  const basePeriodKey=periodKeyFor(a.recurrence)
 
   let existingQuery=supabase
    .from('activity_completions')
-   .select('id, approval_status, completed_by, completed_at, proof_url')
+   .select('id, approval_status, completed_by, completed_at, proof_url, period_key')
    .eq('activity_id',a.id)
-   .eq('period_key',periodKey)
    .in('approval_status',['pending','approved','not_required'])
+
+  existingQuery=target>1
+   ? existingQuery.like('period_key',`${basePeriodKey}%`)
+   : existingQuery.eq('period_key',basePeriodKey)
 
   if(a.completionMode==='per_member'){
    existingQuery=existingQuery.eq('completed_by',user.id)
@@ -1238,7 +1313,6 @@ const [data,setData]=useState<AppData>(load)
 
   const {data:existing,error:existingError}=await existingQuery
    .order('completed_at',{ascending:false})
-   .limit(1)
 
   if(existingError){
    console.error('Unable to check activity completion:',existingError)
@@ -1246,31 +1320,38 @@ const [data,setData]=useState<AppData>(load)
    return
   }
 
-  if(existing&&existing.length>0){
-   const saved=existing[0]
-
-   if(saved.approval_status==='pending'){
-    note('Already waiting for approval.')
-    return
-   }
-
-   await award(
-    a,
-    saved.completed_by || user.id,
-    saved.id,
-    saved.completed_at
+  const liveCompletions=existing || []
+  const pendingCompletion=liveCompletions.find(
+   completion=>completion.approval_status==='pending'
+  )
+  const earnedCompletions=liveCompletions.filter(
+   completion=>['approved','not_required'].includes(
+    completion.approval_status
    )
+  )
+
+  if(pendingCompletion){
+   note('Already waiting for approval.')
+   return
+  }
+
+  if(earnedCompletions.length>=target){
+   note('You already finished this activity for this period.')
    return
   }
 
   const proofUrl=await uploadProof(a)
-
   if(proofUrl===null) return
 
   const approvalStatus=
    a.approval&&a.approverIds.length
     ? 'pending'
     : 'not_required'
+
+  const periodKey=nextPeriodKey(
+   a.recurrence,
+   liveCompletions.map(completion=>completion.period_key)
+  )
 
   const {data:completion,error:completionError}=await supabase
    .from('activity_completions')
@@ -1284,7 +1365,7 @@ const [data,setData]=useState<AppData>(load)
     approval_status:approvalStatus
    })
    .select(
-    'id, completed_by, completed_at, approval_status, proof_url'
+    'id, completed_by, completed_at, approval_status, proof_url, period_key'
    )
    .single()
 
@@ -1304,7 +1385,7 @@ const [data,setData]=useState<AppData>(load)
     space_id:a.spaceId,
     type:'approval_needed',
     title:'Approval needed 👀',
-    message:`${user.name} completed ${a.name}. Tap to review.`,
+    message:`${user.name} submitted ${a.name} for approval.`,
     activity_id:a.id
    }))
 
@@ -1325,7 +1406,7 @@ const [data,setData]=useState<AppData>(load)
     )
    })
 
-   note('Sent for approval.')
+   note('Submitted for approval.')
    return
   }
 
@@ -1486,6 +1567,15 @@ const [data,setData]=useState<AppData>(load)
    }
   }
 
+  const target=a.periodTarget || recurrenceTarget(a.recurrence)
+  const affectsCurrentView=
+   a.completionMode==='shared_once' || who===user.id
+  const nextProgress=affectsCurrentView
+   ? Math.min(target,(a.periodProgress || 0)+1)
+   : (a.periodProgress || 0)
+  const nextStatus:ActivityStatus=
+   nextProgress>=target ? 'complete' : 'open'
+
   update({
    ...data,
    spaces:nextSpaces,
@@ -1505,9 +1595,16 @@ const [data,setData]=useState<AppData>(load)
     x.id===a.id
      ? {
         ...x,
-        status:'complete',
+        status:nextStatus,
         completedBy:who,
-        completedAt:completedAt || new Date().toISOString()
+        completedAt:completedAt || new Date().toISOString(),
+        periodProgress:nextProgress,
+        periodTarget:target,
+        periodLabel:recurrenceProgressLabel(
+         a.recurrence,
+         nextProgress,
+         target
+        )
        }
      : x
    ),
@@ -1543,15 +1640,21 @@ const [data,setData]=useState<AppData>(load)
   if(a.status!=='complete'||!a.completedBy) return
 
   const who=a.completedBy
-  const periodKey=periodKeyFor(a.recurrence)
+  const target=a.periodTarget || recurrenceTarget(a.recurrence)
+  const basePeriodKey=periodKeyFor(a.recurrence)
 
-  const {data:completion,error:completionError}=await supabase
+  let completionQuery=supabase
    .from('activity_completions')
-   .select('id, approval_status')
+   .select('id, approval_status, period_key')
    .eq('activity_id',a.id)
    .eq('completed_by',who)
-   .eq('period_key',periodKey)
    .in('approval_status',['approved','not_required'])
+
+  completionQuery=target>1
+   ? completionQuery.like('period_key',`${basePeriodKey}%`)
+   : completionQuery.eq('period_key',basePeriodKey)
+
+  const {data:completion,error:completionError}=await completionQuery
    .order('completed_at',{ascending:false})
    .limit(1)
    .maybeSingle()
@@ -1695,6 +1798,12 @@ const [data,setData]=useState<AppData>(load)
    }
   }
 
+  const affectsCurrentView=
+   a.completionMode==='shared_once' || who===user.id
+  const nextProgress=affectsCurrentView
+   ? Math.max(0,(a.periodProgress || target)-1)
+   : (a.periodProgress || 0)
+
   update({
    ...data,
    spaces:nextSpaces,
@@ -1712,10 +1821,17 @@ const [data,setData]=useState<AppData>(load)
     x.id===a.id
      ? {
         ...x,
-        status:'open',
+        status:nextProgress>=target?'complete':'open',
         completedBy:undefined,
         completedAt:undefined,
-        proofUrl:undefined
+        proofUrl:undefined,
+        periodProgress:nextProgress,
+        periodTarget:target,
+        periodLabel:recurrenceProgressLabel(
+         a.recurrence,
+         nextProgress,
+         target
+        )
        }
      : x
    ),
@@ -1741,14 +1857,20 @@ const [data,setData]=useState<AppData>(load)
  const approve=async(a:Activity)=>{
   if(a.status!=='pending'||!a.approverIds.includes(user.id)) return
 
-  const periodKey=periodKeyFor(a.recurrence)
+  const target=a.periodTarget || recurrenceTarget(a.recurrence)
+  const basePeriodKey=periodKeyFor(a.recurrence)
 
-  const {data:completion,error:completionError}=await supabase
+  let completionQuery=supabase
    .from('activity_completions')
-   .select('id, completed_by, completed_at')
+   .select('id, completed_by, completed_at, period_key')
    .eq('activity_id',a.id)
-   .eq('period_key',periodKey)
    .eq('approval_status','pending')
+
+  completionQuery=target>1
+   ? completionQuery.like('period_key',`${basePeriodKey}%`)
+   : completionQuery.eq('period_key',basePeriodKey)
+
+  const {data:completion,error:completionError}=await completionQuery
    .order('completed_at',{ascending:false})
    .limit(1)
    .maybeSingle()
@@ -1792,14 +1914,20 @@ const [data,setData]=useState<AppData>(load)
  const sendBack=async(a:Activity)=>{
   if(a.status!=='pending'||!a.approverIds.includes(user.id)) return
 
-  const periodKey=periodKeyFor(a.recurrence)
+  const target=a.periodTarget || recurrenceTarget(a.recurrence)
+  const basePeriodKey=periodKeyFor(a.recurrence)
 
-  const {data:completion,error:completionError}=await supabase
+  let completionQuery=supabase
    .from('activity_completions')
-   .select('id, completed_by')
+   .select('id, completed_by, period_key')
    .eq('activity_id',a.id)
-   .eq('period_key',periodKey)
    .eq('approval_status','pending')
+
+  completionQuery=target>1
+   ? completionQuery.like('period_key',`${basePeriodKey}%`)
+   : completionQuery.eq('period_key',basePeriodKey)
+
+  const {data:completion,error:completionError}=await completionQuery
    .order('completed_at',{ascending:false})
    .limit(1)
    .maybeSingle()
@@ -1839,13 +1967,15 @@ const [data,setData]=useState<AppData>(load)
    activity_id:a.id
   }])
 
+  const progress=a.periodProgress || 0
+
   update({
    ...data,
    activities:data.activities.map((x):Activity=>
     x.id===a.id
      ? {
         ...x,
-        status:'open',
+        status:progress>=(a.periodTarget || 1)?'complete':'open',
         completedBy:undefined,
         completedAt:undefined,
         proofUrl:undefined
@@ -1868,143 +1998,766 @@ const [data,setData]=useState<AppData>(load)
 if (!authenticated) {
   return <Auth onAuthenticated={() => setAuthenticated(true)} />
 }
- return <div className="app">
+ return <div className="app rally9-app">
   {toast&&<div className="toast">{toast}</div>}
-  <header className="topbar">
-   <button className="brand" onClick={()=>setScreen('home')}><span>{BRAND.logo}</span><b>{BRAND.name}</b></button>
-   <div className="space-switcher">
-    <select value={spaceId} onChange={e=>{setSpaceId(e.target.value);setScreen('home')}}>
-     <option value="all">🌈 All My Rally</option>
-     {spaces.map(s=><option value={s.id} key={s.id}>{s.icon} {s.name}</option>)}
-    </select>
-    <button className="plus" title="Create a Rally Space" aria-label="Create a Rally Space" onClick={()=>setInviteOpen(!inviteOpen)}>＋</button>
+
+  <header className="topbar rally9-topbar">
+   <button
+    className="brand"
+    onClick={()=>{setSpaceId('all');setScreen('home')}}
+    aria-label="Go to Rally home"
+   >
+    <span>{BRAND.logo}</span><b>{BRAND.name}</b>
+   </button>
+
+   <div className="top-context">
+    {activeSpace
+     ? <button
+        className="context-space-pill"
+        onClick={()=>{setSpaceId('all');setScreen('home')}}
+       >
+        <span>←</span> {activeSpace.icon} {activeSpace.name}
+       </button>
+     : <span className="context-home-copy">Make progress feel good.</span>
+    }
    </div>
-<div className="top-actions">
-  <button
-    className="bell"
-    title="Notifications"
-    aria-label="Notifications"
-    onClick={() => setScreen('notifications')}
-  >
-    🔔{unread > 0 && <b>{unread}</b>}
-  </button>
 
-  <button
-    className="profile-shortcut"
-    onClick={() => setScreen('profile')}
-  >
-    <Avatar member={user}/>
-  </button>
+   <div className="top-actions">
+    <button
+     className="top-create-button"
+     onClick={()=>setInviteOpen(true)}
+     title="Create a Rally"
+    >
+     ＋ <span>New Rally</span>
+    </button>
 
-  <button
-    className="secondary"
-    onClick={logout}
-    title={`Logged in as ${authUser?.email ?? 'Rally user'}`}
-  >
-    Log out
-  </button>
-</div>
+    <button
+     className="bell"
+     title="Notifications"
+     aria-label="Notifications"
+     onClick={()=>{setSpaceId('all');setScreen('notifications')}}
+    >
+     🔔{unread>0&&<b>{unread}</b>}
+    </button>
+
+    <button
+     className="profile-shortcut"
+     onClick={()=>{setSpaceId('all');setScreen('profile')}}
+     aria-label="Profile"
+    >
+     <Avatar member={user}/>
+    </button>
+   </div>
   </header>
 
-{inviteOpen&&<CreateSpace data={data} update={update} user={user} authUser={authUser} close={()=>setInviteOpen(false)}/>}
-  <main>
-   {spaceId==='all'?<AllView data={data} user={user} spaces={spaces} screen={screen} setScreen={setScreen} setSpaceId={setSpaceId}/>:activeSpace&&<>
-    <SpaceHeader space={activeSpace} role={myRole} openSettings={()=>setScreen('settings')}/>
-    {screen==='home'&&<SpaceHome data={data} space={activeSpace} user={user} activities={visibleActivities} complete={complete} setScreen={setScreen}/>}
-    {screen==='activities'&&<Activities data={data} space={activeSpace} user={user} activities={visibleActivities} complete={complete} approve={approve} sendBack={sendBack} update={update} note={note}/>}
-    {screen==='leaderboard'&&<Leaderboard data={data} space={activeSpace} user={user}/>}
-    {screen==='stats'&&<Stats data={data} space={activeSpace}/>}
-    {screen==='goals'&&<Goals data={data} space={activeSpace} user={user} update={update} note={note}/>}
-    {screen==='treats'&&<Treats data={data} space={activeSpace} user={user} update={update} note={note}/>}
-    {screen==='members'&&<Members data={data} space={activeSpace} user={user} update={update} note={note}/>}
-    {screen==='settings'&&<SpaceSettings data={data} space={activeSpace} user={user} update={update} note={note}/>}
-   </>}
-   {screen==='community'&&<Community data={data} user={user} spaces={spaces} update={update} note={note}/>}
-   {screen==='profile'&&<Profile data={data} user={user} spaces={spaces} update={update} note={note} setSpaceId={setSpaceId} setScreen={setScreen}/>}
-   {screen==='account-settings'&&<AccountSettings data={data} user={user} update={update} note={note}/>}
-   {screen==='plan'&&<PlanSettings data={data} user={user} spaces={spaces} setSpaceId={setSpaceId} setScreen={setScreen}/>}
-   {screen==='friends'&&<FriendsSettings data={data} user={user} update={update} note={note}/>}
-   {screen==='activity-settings'&&<ActivitySettingsIndex data={data} user={user} spaces={spaces} setSpaceId={setSpaceId} setScreen={setScreen}/>}
-   {screen==='notifications'&&<Notifications data={data} user={user} update={update} setSpaceId={setSpaceId} setScreen={setScreen}/>}
+  {inviteOpen&&
+   <CreateSpace
+    data={data}
+    update={update}
+    user={user}
+    authUser={authUser}
+    close={()=>setInviteOpen(false)}
+   />
+  }
+
+  <main className="rally9-main">
+   {screen==='notifications'&&
+    <Notifications
+     data={data}
+     user={user}
+     update={update}
+     setSpaceId={setSpaceId}
+     setScreen={setScreen}
+    />
+   }
+
+   {screen==='community'&&
+    <Community
+     data={data}
+     user={user}
+     spaces={spaces}
+     update={update}
+     note={note}
+     setScreen={setScreen}
+    />
+   }
+
+   {screen==='profile'&&
+    <Profile
+     data={data}
+     user={user}
+     spaces={spaces}
+     update={update}
+     note={note}
+     setSpaceId={setSpaceId}
+     setScreen={setScreen}
+     logout={logout}
+    />
+   }
+
+   {screen==='account-settings'&&
+    <AccountSettings data={data} user={user} update={update} note={note}/>
+   }
+
+   {screen==='plan'&&
+    <PlanSettings
+     data={data}
+     user={user}
+     spaces={spaces}
+     setSpaceId={setSpaceId}
+     setScreen={setScreen}
+    />
+   }
+
+   {screen==='friends'&&
+    <FriendsSettings data={data} user={user} update={update} note={note}/>
+   }
+
+   {screen==='activity-settings'&&
+    <ActivitySettingsIndex
+     data={data}
+     user={user}
+     spaces={spaces}
+     setSpaceId={setSpaceId}
+     setScreen={setScreen}
+    />
+   }
+
+   {!['notifications','community','profile','account-settings','plan','friends','activity-settings'].includes(screen)&&spaceId==='all'&&
+    <>
+     {screen==='activities'
+      ? <GlobalActivities
+         data={data}
+         user={user}
+         spaces={spaces}
+         activities={visibleActivities}
+         complete={complete}
+         approve={approve}
+         sendBack={sendBack}
+         update={update}
+         note={note}
+        />
+      : <GlobalHome
+         data={data}
+         user={user}
+         spaces={spaces}
+         activities={visibleActivities}
+         complete={complete}
+         approve={approve}
+         sendBack={sendBack}
+         setSpaceId={setSpaceId}
+         setScreen={setScreen}
+        />
+     }
+    </>
+   }
+
+   {!['notifications','community','profile','account-settings','plan','friends','activity-settings'].includes(screen)&&spaceId!=='all'&&activeSpace&&
+    <>
+     <SpaceHeader
+      space={activeSpace}
+      role={myRole}
+      backHome={()=>{setSpaceId('all');setScreen('home')}}
+      openSettings={()=>setScreen('settings')}
+     />
+
+     <RallyTabs
+      screen={screen}
+      space={activeSpace}
+      setScreen={setScreen}
+     />
+
+     {screen==='home'&&
+      <SpaceHome
+       data={data}
+       space={activeSpace}
+       user={user}
+       activities={visibleActivities}
+       complete={complete}
+       approve={approve}
+       sendBack={sendBack}
+       setScreen={setScreen}
+      />
+     }
+
+     {screen==='activities'&&
+      <Activities
+       data={data}
+       space={activeSpace}
+       user={user}
+       activities={visibleActivities}
+       complete={complete}
+       approve={approve}
+       sendBack={sendBack}
+       update={update}
+       note={note}
+      />
+     }
+
+     {screen==='leaderboard'&&
+      <Leaderboard data={data} space={activeSpace} user={user}/>
+     }
+
+     {screen==='stats'&&<Stats data={data} space={activeSpace}/>} 
+
+     {screen==='goals'&&
+      <Goals
+       data={data}
+       space={activeSpace}
+       user={user}
+       update={update}
+       note={note}
+      />
+     }
+
+     {screen==='treats'&&
+      <Treats
+       data={data}
+       space={activeSpace}
+       user={user}
+       update={update}
+       note={note}
+      />
+     }
+
+     {screen==='members'&&
+      <Members
+       data={data}
+       space={activeSpace}
+       user={user}
+       update={update}
+       note={note}
+      />
+     }
+
+     {screen==='settings'&&
+      <SpaceSettings
+       data={data}
+       space={activeSpace}
+       user={user}
+       update={update}
+       note={note}
+      />
+     }
+    </>
+   }
   </main>
 
-  <nav className="nav">
-   <NavButton active={screen==='home'} icon="⌂" label="Home" go={()=>setScreen('home')}/>
-   {spaceId!=='all'&&<><NavButton active={screen==='activities'} icon="✓" label="Activities" go={()=>setScreen('activities')}/><NavButton active={screen==='leaderboard'} icon="🏁" label="Leaderboard" go={()=>setScreen('leaderboard')}/><NavButton active={screen==='goals'} icon="◎" label="Goals" go={()=>setScreen('goals')}/><NavButton active={screen==='treats'} icon="🎁" label="Treats" go={()=>setScreen('treats')}/></>}
-   <NavButton active={screen==='community'} icon="◉" label="Community" go={()=>setScreen('community')}/>
-   {spaceId!=='all'&&<NavButton active={screen==='members'} icon="👥" label="Members" go={()=>setScreen('members')}/>}
-   <NavButton active={screen==='profile'} icon="☺" label="Profile" go={()=>setScreen('profile')}/>
+  <nav className="nav rally9-nav" aria-label="Main navigation">
+   <NavButton
+    active={spaceId==='all'&&screen==='home'}
+    icon="⌂"
+    label="Home"
+    go={()=>{setSpaceId('all');setScreen('home')}}
+   />
+   <NavButton
+    active={spaceId==='all'&&screen==='activities'}
+    icon="✓"
+    label="Activities"
+    go={()=>{setSpaceId('all');setScreen('activities')}}
+   />
+   <NavButton
+    active={screen==='community'}
+    icon="◉"
+    label="Community"
+    go={()=>{setSpaceId('all');setScreen('community')}}
+   />
+   <NavButton
+    active={['profile','account-settings','plan','friends','activity-settings'].includes(screen)}
+    icon="☺"
+    label="Profile"
+    go={()=>{setSpaceId('all');setScreen('profile')}}
+   />
   </nav>
  </div>
 }
 
-function Avatar({member}:{member:Member}){return member.avatar?<img className="avatar" src={member.avatar}/>:<span className="avatar">{initials(member.name)}</span>}
-function NavButton({active,icon,label,go}:{active:boolean;icon:string;label:string;go:()=>void}){return <button className={active?'active':''} onClick={go}><span>{icon}</span><small>{label}</small></button>}
-function Progress({value,max}:{value:number;max:number}){return <div className="progress"><span style={{width:`${Math.min(100,value/Math.max(1,max)*100)}%`}}/></div>}
+function Avatar({member}:{member:Member}){
+ return member.avatar
+  ? <img className="avatar" src={member.avatar}/>
+  : <span className="avatar">{initials(member.name)}</span>
+}
 
-function SpaceHeader({space,role,openSettings}:{space:Space;role?:Role;openSettings:()=>void}){const canManage=role==='Owner'||role==='Admin';return <section className={`space-header ${space.type}`}><div><p>{space.icon} {space.type.toUpperCase()} RALLY</p><h1>{space.name}</h1><span>{space.timezone}</span></div><div className="space-header-actions"><span className="role">{role}</span>{canManage&&<button className="space-settings-button" onClick={openSettings}>⚙️ Settings</button>}</div></section>}
+function NavButton({active,icon,label,go}:{active:boolean;icon:string;label:string;go:()=>void}){
+ return <button className={active?'active':''} onClick={go}>
+  <span>{icon}</span><small>{label}</small>
+ </button>
+}
 
-function AllView({data,user,spaces,screen,setScreen,setSpaceId}:{data:AppData;user:Member;spaces:Space[];screen:Screen;setScreen:(s:Screen)=>void;setSpaceId:(id:string)=>void}){
- if(screen==='community'||screen==='notifications'||screen==='profile')return null
- const today=data.history.filter(h=>h.memberId===user.id).slice(0,6)
- const totalWeek=spaces.reduce((sum,s)=>sum+(spaceMember(s,user.id)?.weekly||0),0)
+function Progress({value,max}:{value:number;max:number}){
+ return <div className="progress">
+  <span style={{width:`${Math.min(100,value/Math.max(1,max)*100)}%`}}/>
+ </div>
+}
+
+function SpaceHeader({space,role,backHome,openSettings}:{space:Space;role?:Role;backHome:()=>void;openSettings:()=>void}){
+ const canManage=role==='Owner'||role==='Admin'
+ return <section className={`space-header rally9-space-header ${space.type}`}>
+  <button className="space-back" onClick={backHome}>← Home</button>
+  <div className="space-title-lockup">
+   <span className="space-hero-icon">{space.icon}</span>
+   <div>
+    <p>{space.type==='personal'?'PERSONAL RALLY':`${space.type.toUpperCase()} RALLY`}</p>
+    <h1>{space.name}</h1>
+    <span>{space.members.length} {space.members.length===1?'member':'members'} · {role}</span>
+   </div>
+  </div>
+  {canManage&&
+   <button className="space-settings-button" onClick={openSettings}>
+    ⚙️ Settings
+   </button>
+  }
+ </section>
+}
+
+function RallyTabs({screen,space,setScreen}:{screen:Screen;space:Space;setScreen:(s:Screen)=>void}){
+ const tabs:{screen:Screen;label:string}[]=[
+  {screen:'home',label:'Overview'},
+  {screen:'activities',label:'Activities'},
+  {screen:'goals',label:'Goals'},
+  {screen:'treats',label:'Treats'},
+  {screen:'members',label:'Members'},
+  {screen:'stats',label:'Insights'}
+ ]
+
+ return <nav className="rally-tabs" aria-label={`${space.name} navigation`}>
+  {tabs.map(tab=>
+   <button
+    key={tab.screen}
+    className={screen===tab.screen?'active':''}
+    onClick={()=>setScreen(tab.screen)}
+   >
+    {tab.label}
+   </button>
+  )}
+ </nav>
+}
+
+function GlobalHome({data,user,spaces,activities,complete,approve,sendBack,setSpaceId,setScreen}:{data:AppData;user:Member;spaces:Space[];activities:Activity[];complete:(a:Activity)=>void;approve:(a:Activity)=>void;sendBack:(a:Activity)=>void;setSpaceId:(id:string)=>void;setScreen:(s:Screen)=>void}){
+ const ready=activities
+  .filter(a=>
+   a.status==='open' &&
+   (a.assignedTo.length===0||a.assignedTo.includes(user.id))
+  )
+  .sort((a,b)=>
+   recurrencePriority(a.recurrence)-recurrencePriority(b.recurrence) ||
+   b.points-a.points
+  )
+
+ const approvals=activities.filter(a=>
+  a.status==='pending'&&a.approverIds.includes(user.id)
+ )
+
+ const totalWeekly=spaces.reduce(
+  (sum,space)=>sum+(spaceMember(space,user.id)?.weekly||0),0
+ )
+
+ const weekStart=startOfCurrentWeek()
+ const weeklyWins=data.history.filter(history=>{
+  if(history.memberId!==user.id||history.kind!=='earn') return false
+  const date=new Date(history.createdAt)
+  return !Number.isNaN(date.getTime())&&date>=weekStart
+ })
+
+ const activeDays=new Set(
+  weeklyWins.map(history=>{
+   const date=new Date(history.createdAt)
+   return Number.isNaN(date.getTime())?'':localDateKey(date)
+  }).filter(Boolean)
+ ).size
+
+ const topTreat=data.treats
+  .filter(treat=>
+   treat.status==='locked'&&
+   (treat.assignedTo.length===0||treat.assignedTo.includes(user.id))
+  )
+  .sort((a,b)=>{
+   const aPriority=a.priorityFor.includes(user.id)?0:1
+   const bPriority=b.priorityFor.includes(user.id)?0:1
+   if(aPriority!==bPriority) return aPriority-bPriority
+   const aBalance=spaceMember(
+    spaces.find(space=>space.id===a.spaceId)!,user.id
+   )?.balance||0
+   const bBalance=spaceMember(
+    spaces.find(space=>space.id===b.spaceId)!,user.id
+   )?.balance||0
+   return Math.max(0,a.points-aBalance)-Math.max(0,b.points-bBalance)
+  })[0]
+
+ const topGoal=data.goals
+  .filter(goal=>goal.status==='active'||goal.status==='reached')
+  .sort((a,b)=>
+   (b.progress/Math.max(1,b.target))-(a.progress/Math.max(1,a.target))
+  )[0]
+
+ const motivationSpace=topTreat
+  ? spaces.find(space=>space.id===topTreat.spaceId)
+  : topGoal
+   ? spaces.find(space=>space.id===topGoal.spaceId)
+   : undefined
+
+ const recentWins=data.history
+  .filter(history=>history.memberId===user.id&&history.kind==='earn')
+  .slice(0,5)
+
+ const hasAnyActivities=activities.some(a=>
+  a.assignedTo.includes(user.id)||a.createdBy===user.id
+ )
+
  return <>
-  <section className="all-hero"><div><p>🌈 ALL MY RALLY</p><h1>Your whole life, one view.</h1><span>See what needs attention without mixing each Rally's private points or data.</span></div><div className="big-total"><strong>{totalWeek}</strong><span>points this week</span></div></section>
-  <section className="all-grid">{spaces.map(s=>{const sm=spaceMember(s,user.id)!;const rank=[...s.members].sort((a,b)=>b.weekly-a.weekly).findIndex(m=>m.memberId===user.id)+1;const open=data.activities.filter(a=>a.spaceId===s.id&&a.status==='open'&&(a.assignedTo.includes(user.id)||a.assignedTo.length===0)).length;const pending=data.activities.filter(a=>a.spaceId===s.id&&a.status==='pending'&&a.approverIds.includes(user.id)).length;return <button className="space-summary" key={s.id} onClick={()=>{setSpaceId(s.id);setScreen('home')}}><div className="space-summary-top"><span className="space-icon">{s.icon}</span><div><strong>{s.name}</strong><small>{s.type}</small></div><b>→</b></div><div className="summary-stats"><span><b>{sm.balance}</b> available</span><span><b>{sm.weekly}</b> this week</span>{s.members.length>1&&<span><b>#{rank}</b> rank</span>}</div><div className="summary-bottom"><span>{open} activities ready</span>{pending>0&&<span className="alert">{pending} approval{pending>1?'s':''}</span>}</div></button>})}</section>
-  <section className="panel"><div className="section-title"><div><p className="eyebrow">Across your spaces</p><h2>Recent wins</h2></div></div>{today.map(h=><div className="history-row" key={h.id}><span>{data.spaces.find(s=>s.id===h.spaceId)?.icon}</span><div><strong>{h.title}</strong><small>{data.spaces.find(s=>s.id===h.spaceId)?.name} · {h.createdAt}</small></div><b>+{h.points}</b></div>)}</section>
- </>}
+  <section className="rally9-welcome">
+   <div>
+    <p className="eyebrow">HOME</p>
+    <h1>Hey {user.name.split(' ')[0]} 👋</h1>
+    <p>Ready for a small win?</p>
+   </div>
+   <div className="welcome-score">
+    <strong>{totalWeekly}</strong>
+    <span>points this week</span>
+   </div>
+  </section>
 
-function SpaceHome({data,space,user,activities,complete,setScreen}:{data:AppData;space:Space;user:Member;activities:Activity[];complete:(a:Activity)=>void;setScreen:(s:Screen)=>void}){
- const sm=spaceMember(space,user.id)!
- const leaders=[...space.members].sort((a,b)=>b.weekly-a.weekly)
- const max=Math.max(1,...leaders.map(x=>x.weekly))
- const ready=activities.filter(a=>a.status==='open'&&(a.assignedTo.includes(user.id)||a.assignedTo.length===0)).slice(0,4)
- const priority=data.treats.find(t=>t.spaceId===space.id&&t.status==='locked'&&t.priorityFor.includes(user.id))
- const recent=data.history.filter(h=>h.spaceId===space.id).slice(0,5)
+  {approvals.length>0&&
+   <section className="attention-panel">
+    <div className="section-title compact-title">
+     <div>
+      <p className="eyebrow">Needs your attention</p>
+      <h2>{approvals.length} {approvals.length===1?'completion needs':'completions need'} you</h2>
+     </div>
+    </div>
+    {approvals.slice(0,3).map(activity=>
+     <ActivityCard
+      key={activity.id}
+      a={activity}
+      data={data}
+      user={user}
+      complete={complete}
+      approve={approve}
+      sendBack={sendBack}
+      showSpace
+     />
+    )}
+   </section>
+  }
+
+  <section className="panel home-up-next">
+   <div className="section-title">
+    <div>
+     <p className="eyebrow">Up next</p>
+     <h2>{ready.length?`${ready.length} ready for you`:'You’re all caught up 🎉'}</h2>
+    </div>
+    {ready.length>4&&
+     <button onClick={()=>setScreen('activities')}>See all →</button>
+    }
+   </div>
+
+   {!hasAnyActivities&&
+    <div className="first-win-empty">
+     <span>✦</span>
+     <div>
+      <h3>Your first win starts here</h3>
+      <p>Add one small thing you’d like to make progress on.</p>
+     </div>
+     <button className="primary" onClick={()=>setScreen('activities')}>
+      + Add your first activity
+     </button>
+    </div>
+   }
+
+   {hasAnyActivities&&ready.length===0&&
+    <div className="empty friendly-empty">
+     Nothing needs your attention right now. Enjoy the win.
+    </div>
+   }
+
+   {ready.slice(0,4).map(activity=>
+    <ActivityCard
+     key={activity.id}
+     a={activity}
+     data={data}
+     user={user}
+     complete={complete}
+     approve={approve}
+     sendBack={sendBack}
+     showSpace
+    />
+   )}
+  </section>
+
+  <section className="home-rallies-section">
+   <div className="section-title">
+    <div>
+     <p className="eyebrow">Your Rallies</p>
+     <h2>{spaces.length===1?'Your Rally':'Your spaces'}</h2>
+    </div>
+   </div>
+
+   <div className="rally-card-grid">
+    {spaces.map(space=>{
+     const sm=spaceMember(space,user.id)!
+     const readyCount=data.activities.filter(a=>
+      a.spaceId===space.id&&
+      a.status==='open'&&
+      (a.assignedTo.length===0||a.assignedTo.includes(user.id))
+     ).length
+     const rank=space.members.length>1
+      ? [...space.members]
+        .sort((a,b)=>b.weekly-a.weekly)
+        .findIndex(member=>member.memberId===user.id)+1
+      : 0
+
+     return <button
+      className={`rally-card ${space.type}`}
+      key={space.id}
+      onClick={()=>{setSpaceId(space.id);setScreen('home')}}
+     >
+      <span className="rally-card-icon">{space.icon}</span>
+      <div className="rally-card-main">
+       <strong>{space.name}</strong>
+       <small>{readyCount} ready{rank?` · #${rank} this week`:''}</small>
+      </div>
+      <div className="rally-card-points">
+       <b>{sm.weekly}</b>
+       <small>this week</small>
+      </div>
+      <span className="rally-card-arrow">→</span>
+     </button>
+    })}
+   </div>
+  </section>
+
+  {(topTreat||topGoal)&&
+   <section className="motivation-card">
+    {topTreat?<>
+     <div className="motivation-icon">{topTreat.icon}</div>
+     <div className="motivation-copy">
+      <p className="eyebrow">Your next reward</p>
+      <h2>{topTreat.name}</h2>
+      <small>{motivationSpace?.icon} {motivationSpace?.name}</small>
+      <Progress
+       value={spaceMember(motivationSpace!,user.id)?.balance||0}
+       max={topTreat.points}
+      />
+      <b>{Math.max(0,topTreat.points-(spaceMember(motivationSpace!,user.id)?.balance||0))} points away</b>
+     </div>
+    </>:<>
+     <div className="motivation-icon">{topGoal!.icon}</div>
+     <div className="motivation-copy">
+      <p className="eyebrow">You’re building toward</p>
+      <h2>{topGoal!.name}</h2>
+      <small>{motivationSpace?.icon} {motivationSpace?.name}</small>
+      <Progress value={topGoal!.progress} max={topGoal!.target}/>
+      <b>{Math.max(0,topGoal!.target-topGoal!.progress)} points to go</b>
+     </div>
+    </>}
+   </section>
+  }
+
+  <section className="weekly-strip">
+   <div><strong>{totalWeekly}</strong><span>points</span></div>
+   <div><strong>{weeklyWins.length}</strong><span>wins this week</span></div>
+   <div><strong>{activeDays}</strong><span>active {activeDays===1?'day':'days'}</span></div>
+  </section>
+
+  {recentWins.length>0&&
+   <section className="panel recent-wins-panel">
+    <div className="section-title">
+     <div><p className="eyebrow">Recent wins</p><h2>Keep it going</h2></div>
+    </div>
+    {recentWins.map(history=>
+     <div className="history-row" key={history.id}>
+      <span>{data.spaces.find(s=>s.id===history.spaceId)?.icon||'✦'}</span>
+      <div>
+       <strong>{history.title}</strong>
+       <small>{data.spaces.find(s=>s.id===history.spaceId)?.name} · {history.createdAt}</small>
+      </div>
+      <b>+{history.points}</b>
+     </div>
+    )}
+   </section>
+  }
+ </>
+}
+
+function GlobalActivities({data,user,spaces,activities,complete,approve,sendBack,update,note}:{data:AppData;user:Member;spaces:Space[];activities:Activity[];complete:(a:Activity)=>void;approve:(a:Activity)=>void;sendBack:(a:Activity)=>void;update:(d:AppData)=>void;note:(s:string)=>void}){
+ const [statusFilter,setStatusFilter]=useState<'ready'|'waiting'|'done'|'all'>('ready')
+ const [rallyFilter,setRallyFilter]=useState('all')
+ const [createSpaceId,setCreateSpaceId]=useState(spaces[0]?.id||'')
+
+ useEffect(()=>{
+  if(!createSpaceId&&spaces[0]?.id) setCreateSpaceId(spaces[0].id)
+ },[createSpaceId,spaces])
+
+ const relevant=activities.filter(activity=>
+  activity.assignedTo.includes(user.id)||
+  activity.approverIds.includes(user.id)||
+  activity.createdBy===user.id
+ )
+
+ const filtered=relevant
+  .filter(activity=>rallyFilter==='all'||activity.spaceId===rallyFilter)
+  .filter(activity=>{
+   if(statusFilter==='ready'){
+    return activity.status==='open'&&(
+     activity.assignedTo.length===0||activity.assignedTo.includes(user.id)
+    )
+   }
+   if(statusFilter==='waiting') return activity.status==='pending'
+   if(statusFilter==='done') return activity.status==='complete'
+   return activity.status!=='archived'
+  })
+  .sort((a,b)=>
+   recurrencePriority(a.recurrence)-recurrencePriority(b.recurrence)||
+   b.points-a.points
+  )
+
+ const createSpace=spaces.find(space=>space.id===createSpaceId)||spaces[0]
+
  return <>
-  <section className="home-hero"><div><p>{BRAND.tagline}</p><h2>Hey {user.name}! 👋</h2><span>{ready.length} things are ready for you in this Rally.</span></div><div className="score"><strong>{sm.balance}</strong><span>available points</span><small>{sm.weekly} this week</small></div></section>
-  {space.members.length>1&&<section className="leaderboard-preview"><div className="section-title"><div><p className="eyebrow">Weekly race</p><h2>Leaderboard 🏁</h2></div><button onClick={()=>setScreen('leaderboard')}>Full leaderboard →</button></div>{leaders.map((m,i)=><div className={`racer ${i===0?'first':''}`} key={m.memberId}><span>{i===0?'👑':`#${i+1}`}</span><Avatar member={data.members.find(x=>x.id===m.memberId)!}/><strong>{memberName(data,m.memberId)}</strong><div className="track"><i style={{width:`${Math.max(8,m.weekly/max*100)}%`}}/></div><b>{m.weekly}</b></div>)}</section>}
-  <section className="point-strip">{space.members.map(m=><article key={m.memberId} className={m.memberId===user.id?'me':''}><Avatar member={data.members.find(x=>x.id===m.memberId)!}/><div><small>{memberName(data,m.memberId)}</small><strong>{m.balance}</strong><span>{m.weekly} this week</span></div></article>)}</section>
-  <section className="quick-actions"><button onClick={()=>setScreen('activities')}>＋ Activity</button><button onClick={()=>setScreen('goals')}>＋ Goal</button><button onClick={()=>setScreen('treats')}>＋ Treat</button></section><section className="home-grid"><article className="panel"><div className="section-title"><div><p className="eyebrow">Ready now</p><h2>Activities</h2></div><button onClick={()=>setScreen('activities')}>See all</button></div>{ready.length?ready.map(a=><ActivityCard key={a.id} a={a} data={data} user={user} complete={complete}/>):<div className="empty">Everything for this period is complete 🎉</div>}</article><article className="panel priority"><p className="eyebrow">Top-priority treat</p>{priority?<><span className="huge">{priority.icon}</span><h2>{priority.name}</h2><p>{priority.description}</p><Progress value={sm.balance} max={priority.points}/><b>{Math.max(0,priority.points-sm.balance)} points to go</b></>:<><h2>Pick your motivation</h2><p>Set a treat as top priority and it will live here.</p></>}</article></section>
-  {space.members.length>1&&<section className="panel"><div className="section-title"><div><p className="eyebrow">Who did what</p><h2>Recent Rally activity</h2></div></div>{recent.map(h=><div className="history-row" key={h.id}><Avatar member={data.members.find(x=>x.id===h.memberId)!}/><div><strong>{h.title}</strong><small>{h.detail}</small></div><b>+{h.points}</b></div>)}</section>}
- </>}
+  <section className="page-heading simple-heading">
+   <div>
+    <p className="eyebrow">Activities</p>
+    <h1>What’s worth doing next?</h1>
+    <p>Everything assigned to you, across every Rally.</p>
+   </div>
+  </section>
 
-function ActivityCard({a,data,user,complete,approve,sendBack}:{a:Activity;data:AppData;user:Member;complete:(a:Activity)=>void;approve?:(a:Activity)=>void;sendBack?:(a:Activity)=>void}){
+  <section className="activity-toolbar">
+   <div className="segmented activity-segments">
+    {([
+     ['ready','Ready'],
+     ['waiting','Waiting'],
+     ['done','Done'],
+     ['all','All']
+    ] as const).map(([value,label])=>
+     <button
+      key={value}
+      className={statusFilter===value?'active':''}
+      onClick={()=>setStatusFilter(value)}
+     >
+      {label}
+     </button>
+    )}
+   </div>
+
+   <label className="inline-filter">
+    <span>Rally</span>
+    <select value={rallyFilter} onChange={e=>setRallyFilter(e.target.value)}>
+     <option value="all">All Rallies</option>
+     {spaces.map(space=><option value={space.id} key={space.id}>{space.icon} {space.name}</option>)}
+    </select>
+   </label>
+  </section>
+
+  <section className="panel global-activity-list">
+   {filtered.length===0
+    ? <div className="empty friendly-empty">
+       {statusFilter==='ready'
+        ? 'Nothing is waiting on you right now 🎉'
+        : 'Nothing to show here yet.'
+       }
+      </div>
+    : filtered.map(activity=>
+       <ActivityCard
+        key={activity.id}
+        a={activity}
+        data={data}
+        user={user}
+        complete={complete}
+        approve={approve}
+        sendBack={sendBack}
+        showSpace
+       />
+      )
+   }
+  </section>
+
+  {createSpace&&
+   <details className="panel create-activity-shell">
+    <summary>＋ Add activity</summary>
+    <div className="create-rally-picker">
+     <label>
+      Which Rally?
+      <select value={createSpace.id} onChange={e=>setCreateSpaceId(e.target.value)}>
+       {spaces.map(space=><option value={space.id} key={space.id}>{space.icon} {space.name}</option>)}
+      </select>
+     </label>
+    </div>
+    <AddActivityForm
+     key={createSpace.id}
+     data={data}
+     space={createSpace}
+     user={user}
+     update={update}
+     note={note}
+    />
+   </details>
+  }
+ </>
+}
+
+function ActivityCard({a,data,user,complete,approve,sendBack,showSpace=false}:{a:Activity;data:AppData;user:Member;complete:(a:Activity)=>void;approve?:(a:Activity)=>void;sendBack?:(a:Activity)=>void;showSpace?:boolean}){
+ const space=data.spaces.find(s=>s.id===a.spaceId)
  const canApprove=a.status==='pending'&&a.approverIds.includes(user.id)
- const mySpaceRole=data.spaces
-  .find(s=>s.id===a.spaceId)
-  ?.members.find(m=>m.memberId===user.id)?.role
+ const isAssigned=a.assignedTo.length===0||a.assignedTo.includes(user.id)
+ const mySpaceRole=space?.members.find(m=>m.memberId===user.id)?.role
 
  const canUndo=
   a.status==='complete'&&(
-   a.completedBy===user.id ||
-   mySpaceRole==='Admin' ||
+   a.completedBy===user.id||
+   mySpaceRole==='Admin'||
    mySpaceRole==='Owner'
   )
 
- return <article className={`activity ${a.status}`}>
+ const assignedNames=a.assignedTo
+  .map(id=>memberName(data,id))
+  .filter(Boolean)
+
+ const target=a.periodTarget||1
+ const progress=a.periodProgress||0
+ const completionText=a.approval
+  ? 'Submit completion'
+  : a.proofMode==='Required photo'
+   ? 'Add proof & complete'
+   : `Complete +${a.points}`
+
+ return <article className={`activity rally9-activity ${a.status}`}>
   <span className="activity-icon">{a.icon}</span>
-  <div>
-   <strong>{a.name}</strong>
-   <small>{a.category} · {a.recurrence} · {a.points} pts</small>
-   {a.completedBy&&<small>Completed by {memberName(data,a.completedBy)}</small>}
+  <div className="activity-copy">
+   <div className="activity-title-row">
+    <strong>{a.name}</strong>
+    {showSpace&&space&&<span className="space-badge">{space.icon} {space.name}</span>}
+   </div>
+   <small>{a.category} · {a.points} pts</small>
+   <small className="activity-period">
+    {target>1?a.periodLabel:a.recurrence}
+   </small>
+   {target>1&&
+    <div className="mini-progress-wrap">
+     <Progress value={progress} max={target}/>
+    </div>
+   }
+   {!isAssigned&&a.status==='open'&&assignedNames.length>0&&
+    <small className="assignment-note">For {assignedNames.join(', ')}</small>
+   }
+   {a.status==='complete'&&a.completedBy&&space&&space.members.length>1&&
+    <small>Completed by {memberName(data,a.completedBy)}</small>
+   }
   </div>
+
   <div className="activity-actions">
-   {a.status==='open'&&
-    <button className="primary" onClick={()=>complete(a)}>
-     Complete +{a.points}
+   {a.status==='open'&&isAssigned&&
+    <button className="primary completion-button" onClick={()=>complete(a)}>
+     {completionText}
     </button>
    }
 
    {canApprove&&<>
-    <button className="primary" onClick={()=>approve?.(a)}>
+    <button className="primary completion-button" onClick={()=>approve?.(a)}>
      Approve +{a.points}
     </button>
     {a.proofUrl&&
-     <button
-      className="secondary"
-      onClick={()=>window.open(a.proofUrl,'_blank')}
-     >
+     <button className="secondary" onClick={()=>window.open(a.proofUrl,'_blank')}>
       View proof
      </button>
     }
@@ -2014,81 +2767,105 @@ function ActivityCard({a,data,user,complete,approve,sendBack}:{a:Activity;data:A
    </>}
 
    {a.status==='pending'&&!canApprove&&
-    <span className="pending">Pending approval</span>
+    <span className="pending">Waiting for approval</span>
    }
 
    {a.status==='complete'&&<>
     {a.proofUrl&&
-     <button
-      className="secondary"
-      onClick={()=>window.open(a.proofUrl,'_blank')}
-     >
+     <button className="secondary" onClick={()=>window.open(a.proofUrl,'_blank')}>
       View proof
      </button>
     }
     {canUndo
-     ? <button className="secondary" onClick={()=>complete(a)}>
-        Undo completion
+     ? <button className="secondary subtle-action" onClick={()=>complete(a)}>
+        Undo
        </button>
-     : <span className="complete">✓ Complete</span>
+     : <span className="complete">✓ Done</span>
     }
    </>}
   </div>
  </article>
 }
 
-function Activities({data,space,user,activities,complete,approve,sendBack,update,note}:{data:AppData;space:Space;user:Member;activities:Activity[];complete:(a:Activity)=>void;approve:(a:Activity)=>void;sendBack:(a:Activity)=>void;update:(d:AppData)=>void;note:(s:string)=>void}){
- const [name,setName]=useState('');const [category,setCategory]=useState('Home');const [requireApproval,setRequireApproval]=useState(false)
+function AddActivityForm({data,space,user,update,note}:{data:AppData;space:Space;user:Member;update:(d:AppData)=>void;note:(s:string)=>void}){
+ const solo=space.members.length===1
+ const [name,setName]=useState('')
+ const [category,setCategory]=useState('Other')
+ const [requireApproval,setRequireApproval]=useState(false)
+ const [assignees,setAssignees]=useState<string[]>([user.id])
+ const [completionMode,setCompletionMode]=useState<CompletionMode>('per_member')
  const points=suggestedPoints(name,category)
+
+ useEffect(()=>{
+  setAssignees([user.id])
+  setCompletionMode('per_member')
+  setRequireApproval(false)
+ },[space.id,user.id])
+
+ const toggleAssignee=(id:string)=>{
+  setAssignees(current=>
+   current.includes(id)
+    ? current.filter(memberId=>memberId!==id)
+    : [...current,id]
+  )
+ }
+
  const add=async(e:FormEvent<HTMLFormElement>)=>{
   e.preventDefault()
-
   const form=e.currentTarget
   const f=new FormData(form)
 
-  const assigned=Array.from(
-   f.getAll('assigned')
-  ).map(String)
+  const assignedTo=solo?[user.id]:assignees
+  if(assignedTo.length===0){
+   note('Choose at least one person for this activity.')
+   return
+  }
 
-  const approvers=Array.from(
-   f.getAll('approver')
-  ).map(String)
+  const approvers=requireApproval
+   ? Array.from(f.getAll('approver')).map(String)
+   : []
 
-  const assignedTo=assigned.length
-   ? assigned
-   : space.members.map(m=>m.memberId)
-
-  const approvalRequested=f.get('approval')==='on'
-
-  if(approvalRequested&&approvers.length===0){
+  if(requireApproval&&approvers.length===0){
    note('Choose at least one approver.')
    return
   }
 
-  const activityId=crypto.randomUUID()
+  const finalCompletionMode:CompletionMode=
+   assignedTo.length>1 ? completionMode : 'per_member'
 
+  const pointDestination:Activity['pointDestination']=
+   space.poolEnabled
+    ? String(f.get('pointDestination')||'personal') as 'personal'|'shared'
+    : 'personal'
+
+  const activityId=crypto.randomUUID()
   const a:Activity={
    id:activityId,
    spaceId:space.id,
    name:String(f.get('name')),
    icon:String(f.get('icon')||'✨'),
-   category:String(f.get('category')),
+   category:String(f.get('category')||'Other'),
    points:Number(f.get('points')),
    recurrence:String(f.get('recurrence')),
    status:'open',
    visibility:String(f.get('visibility')) as Visibility,
    assignedTo,
-   completionMode:
-    String(f.get('completionMode')) as CompletionMode,
-   approval:approvalRequested,
+   completionMode:finalCompletionMode,
+   approval:!solo&&requireApproval,
    approverIds:approvers,
    proofMode:String(f.get('proof')) as ProofMode,
    contributesToGoals:f.get('goals')==='on',
-   pointDestination:
-    String(f.get('pointDestination')||'personal') as
-     'personal'|'shared',
+   pointDestination,
    version:1,
-   createdBy:user.id
+   createdBy:user.id,
+   createdAt:new Date().toISOString(),
+   periodProgress:0,
+   periodTarget:recurrenceTarget(String(f.get('recurrence'))),
+   periodLabel:recurrenceProgressLabel(
+    String(f.get('recurrence')),
+    0,
+    recurrenceTarget(String(f.get('recurrence')))
+   )
   }
 
   const {error:activityError}=await supabase
@@ -2132,14 +2909,8 @@ function Activities({data,space,user,activities,complete,approve,sendBack,update
    )
 
   if(assignmentError){
-   console.error(
-    'Unable to save activity assignments:',
-    assignmentError
-   )
-   await supabase
-    .from('activities')
-    .update({status:'archived'})
-    .eq('id',activityId)
+   console.error('Unable to save activity assignments:',assignmentError)
+   await supabase.from('activities').update({status:'archived'}).eq('id',activityId)
    note('Activity could not be fully created.')
    return
   }
@@ -2155,58 +2926,415 @@ function Activities({data,space,user,activities,complete,approve,sendBack,update
     )
 
    if(approverError){
-    console.error(
-     'Unable to save activity approvers:',
-     approverError
-    )
-    await supabase
-     .from('activities')
-     .update({status:'archived'})
-     .eq('id',activityId)
+    console.error('Unable to save activity approvers:',approverError)
+    await supabase.from('activities').update({status:'archived'}).eq('id',activityId)
     note('Activity could not be fully created.')
     return
    }
   }
 
-  update({
-   ...data,
-   activities:[a,...data.activities]
-  })
-
+  update({...data,activities:[a,...data.activities]})
   form.reset()
   setName('')
+  setCategory('Other')
+  setAssignees([user.id])
+  setCompletionMode('per_member')
   setRequireApproval(false)
   note('Activity added.')
  }
+
+ return <form className="form rally9-create-form" onSubmit={add}>
+  <div className="create-form-intro">
+   <div>
+    <p className="eyebrow">New activity</p>
+    <h2>Add something worth doing</h2>
+   </div>
+   {solo&&<span className="smart-default">Assigned to you automatically</span>}
+  </div>
+
+  <div className="activity-basic-grid">
+   <label className="activity-name-field">
+    What do you want to do?
+    <input
+     name="name"
+     required
+     value={name}
+     onChange={e=>setName(e.target.value)}
+     placeholder="Read for 30 minutes"
+    />
+   </label>
+   <label className="icon-field">
+    Icon
+    <input name="icon" placeholder="✨"/>
+   </label>
+  </div>
+
+  <div className="two">
+   <label>
+    How often?
+    <select name="recurrence" defaultValue="Every day">
+     <option>Every day</option>
+     <option>Every week</option>
+     <option>3x/week</option>
+     <option>Every other week</option>
+     <option>Twice/month</option>
+     <option>Every 90 days</option>
+     <option>One time</option>
+    </select>
+   </label>
+   <label>
+    Points
+    <select name="points" defaultValue={String(points)} key={points}>
+     {POINT_OPTIONS.map(point=><option value={point} key={point}>{point} points</option>)}
+    </select>
+   </label>
+  </div>
+
+  {!solo&&<fieldset className="assignment-fieldset">
+   <legend>Who is this for?</legend>
+   <div className="assignment-pills">
+    {space.members.map(member=>{
+     const selected=assignees.includes(member.memberId)
+     return <label className={`person-pill ${selected?'selected':''}`} key={member.memberId}>
+      <input
+       type="checkbox"
+       checked={selected}
+       onChange={()=>toggleAssignee(member.memberId)}
+      />
+      <Avatar member={data.members.find(x=>x.id===member.memberId)!}/>
+      <span>{member.memberId===user.id?'Me':memberName(data,member.memberId)}</span>
+     </label>
+    })}
+   </div>
+  </fieldset>}
+
+  {!solo&&assignees.length>1&&
+   <fieldset className="completion-choice">
+    <legend>Who needs to complete this?</legend>
+    <label className={completionMode==='per_member'?'selected':''}>
+     <input
+      type="radio"
+      name="completionChoice"
+      checked={completionMode==='per_member'}
+      onChange={()=>setCompletionMode('per_member')}
+     />
+     <span>
+      <strong>Everyone individually</strong>
+      <small>Each person gets their own completion and points.</small>
+     </span>
+    </label>
+    <label className={completionMode==='shared_once'?'selected':''}>
+     <input
+      type="radio"
+      name="completionChoice"
+      checked={completionMode==='shared_once'}
+      onChange={()=>setCompletionMode('shared_once')}
+     />
+     <span>
+      <strong>Anyone can complete it</strong>
+      <small>One person completes it for the Rally.</small>
+     </span>
+    </label>
+   </fieldset>
+  }
+
+  <details className="more-options">
+   <summary>More options</summary>
+   <div className="more-options-body">
+    <div className="three">
+     <label>
+      Category
+      <input name="category" value={category} onChange={e=>setCategory(e.target.value)}/>
+     </label>
+     <label>
+      Visibility
+      <select
+       name="visibility"
+       defaultValue={space.type==='personal'&&data.accountPrefs?.privatePersonal?'private':'space'}
+      >
+       <option value="space">Visible to Rally</option>
+       <option value="private">Private</option>
+      </select>
+     </label>
+     <label>
+      Photo proof
+      <select name="proof">
+       <option>None</option>
+       <option>Optional photo</option>
+       <option>Required photo</option>
+      </select>
+     </label>
+    </div>
+
+    {!solo&&
+     <label className="check approval-toggle">
+      <input
+       type="checkbox"
+       checked={requireApproval}
+       onChange={e=>setRequireApproval(e.target.checked)}
+      />
+      Require approval before points are awarded
+     </label>
+    }
+
+    {!solo&&requireApproval&&
+     <fieldset className="approver-picker">
+      <legend>Who can approve?</legend>
+      <div className="approver-options">
+       {space.members
+        .filter(member=>member.memberId!==user.id)
+        .map(member=>
+         <label className="person-option" key={member.memberId}>
+          <input type="checkbox" name="approver" value={member.memberId}/>
+          <Avatar member={data.members.find(x=>x.id===member.memberId)!}/>
+          <span>{memberName(data,member.memberId)}</span>
+         </label>
+        )}
+      </div>
+     </fieldset>
+    }
+
+    {space.poolEnabled&&
+     <fieldset>
+      <legend>Where should the points go?</legend>
+      <label className="check">
+       <input type="radio" name="pointDestination" value="personal" defaultChecked/>
+       My available points
+      </label>
+      <label className="check">
+       <input type="radio" name="pointDestination" value="shared"/>
+       Shared Rally pool
+      </label>
+     </fieldset>
+    }
+
+    <label className="check">
+     <input type="checkbox" name="goals" defaultChecked/>
+     Let these points contribute to this Rally’s active goals
+    </label>
+   </div>
+  </details>
+
+  <button className="primary add-activity-button">Add activity</button>
+ </form>
+}
+
+function Activities({data,space,user,activities,complete,approve,sendBack,update,note}:{data:AppData;space:Space;user:Member;activities:Activity[];complete:(a:Activity)=>void;approve:(a:Activity)=>void;sendBack:(a:Activity)=>void;update:(d:AppData)=>void;note:(s:string)=>void}){
+ const [filter,setFilter]=useState<'ready'|'waiting'|'done'|'all'>('ready')
  const canManage=['Owner','Admin'].includes(roleFor(space,user.id)||'')
+
+ const filtered=activities.filter(activity=>{
+  if(filter==='ready') return activity.status==='open'
+  if(filter==='waiting') return activity.status==='pending'
+  if(filter==='done') return activity.status==='complete'
+  return activity.status!=='archived'
+ })
+
  return <>
-  <section className="activity-hero"><div><p>✓ THIS PERIOD</p><h1>Activities</h1><span>Incomplete activities simply earn no points. No overdue penalties.</span></div><b>{activities.filter(a=>a.status==='complete').length}/{activities.filter(a=>a.status!=='paused'&&a.status!=='archived').length}</b></section>
-  <section className="panel">{activities.filter(a=>a.status!=='archived'&&a.status!=='paused').map(a=><ActivityCard key={a.id} a={a} data={data} user={user} complete={complete} approve={approve} sendBack={sendBack}/>)}</section>
-  <form className="panel form" onSubmit={add}><div className="section-title"><div><p className="eyebrow">Create activity</p><h2>Add something new</h2></div></div><div className="two"><label>Name<input name="name" required value={name} onChange={e=>setName(e.target.value)}/></label><label>Icon<input name="icon" placeholder="✨"/></label></div><div className="three"><label>Category<input name="category" value={category} onChange={e=>setCategory(e.target.value)}/></label><label>Points<select name="points" defaultValue={String(points)} key={points}>{POINT_OPTIONS.map(p=><option value={p} key={p}>{p} points</option>)}</select><small>Suggested: {points}. Admin-controlled presets reduce point inflation.</small></label><label>Recurrence<select name="recurrence"><option>Every day</option><option>Every week</option><option>3x/week</option><option>Every other week</option><option>Twice/month</option><option>Every 90 days</option><option>One time</option></select></label></div><fieldset>
- <legend>Point destination</legend>
+  <section className="page-heading simple-heading rally-page-heading">
+   <div>
+    <p className="eyebrow">Activities</p>
+    <h1>Keep this Rally moving</h1>
+    <p>Complete what’s yours. Everything else stays out of the way.</p>
+   </div>
+  </section>
 
- <label className="check">
-  <input
-   type="radio"
-   name="pointDestination"
-   value="personal"
-   defaultChecked
-  />
-  Personal only
- </label>
+  <div className="segmented activity-segments local-activity-filter">
+   {([
+    ['ready','Ready'],
+    ['waiting','Waiting'],
+    ['done','Done'],
+    ['all','All']
+   ] as const).map(([value,label])=>
+    <button
+     key={value}
+     className={filter===value?'active':''}
+     onClick={()=>setFilter(value)}
+    >
+     {label}
+    </button>
+   )}
+  </div>
 
- <label className="check">
-  <input
-   type="radio"
-   name="pointDestination"
-   value="shared"
-   disabled={!space.poolEnabled}
-  />
-  Shared only{!space.poolEnabled?' (enable the shared pool in Settings)':''}
- </label>
-</fieldset><div className="three"><label>Completion<select name="completionMode"><option value="shared_once">One completion for the Rally</option><option value="per_member">Each member completes it</option></select></label><label>Visibility<select name="visibility" defaultValue={space.type==='personal'&&data.accountPrefs?.privatePersonal?'private':'space'}><option value="space">Visible to Rally</option><option value="private">Private to me</option></select></label><label>Photo proof<select name="proof"><option>None</option><option>Optional photo</option><option>Required photo</option></select></label></div><fieldset><legend>Assign to</legend>{space.members.map(m=><label className="check" key={m.memberId}><input type="checkbox" name="assigned" value={m.memberId}/>{memberName(data,m.memberId)}</label>)}</fieldset>{space.members.length>1&&<><label className="check approval-toggle"><input type="checkbox" name="approval" checked={requireApproval} onChange={e=>setRequireApproval(e.target.checked)}/> Require approval</label>{requireApproval&&<fieldset className="approver-picker"><legend>Who can approve?</legend><p className="field-help">Choose one or more people who can approve this activity.</p><div className="approver-options">{space.members.filter(m=>m.memberId!==user.id).map(m=><label className="person-option" key={m.memberId}><input type="checkbox" name="approver" value={m.memberId}/><Avatar member={data.members.find(x=>x.id===m.memberId)!}/><span>{memberName(data,m.memberId)}</span></label>)}</div></fieldset>}</>}<label className="check"><input type="checkbox" name="goals" defaultChecked/> Count toward this Rally's shared goals</label><button className="primary">Add activity</button></form>
-  {canManage&&<p className="admin-note">Lifecycle controls like pause, archive, restore, point changes, and delete belong in Rally Settings so this page stays focused on doing.</p>}
- </>}
+  <section className="panel">
+   {filtered.length
+    ? filtered.map(activity=>
+       <ActivityCard
+        key={activity.id}
+        a={activity}
+        data={data}
+        user={user}
+        complete={complete}
+        approve={approve}
+        sendBack={sendBack}
+       />
+      )
+    : <div className="empty friendly-empty">Nothing to show here right now.</div>
+   }
+  </section>
+
+  <details className="panel create-activity-shell">
+   <summary>＋ Add activity</summary>
+   <AddActivityForm
+    data={data}
+    space={space}
+    user={user}
+    update={update}
+    note={note}
+   />
+  </details>
+
+  {canManage&&
+   <p className="admin-note">
+    Need to pause, archive, restore, or delete something? Use Rally Settings.
+   </p>
+  }
+ </>
+}
+
+function SpaceHome({data,space,user,activities,complete,approve,sendBack,setScreen}:{data:AppData;space:Space;user:Member;activities:Activity[];complete:(a:Activity)=>void;approve:(a:Activity)=>void;sendBack:(a:Activity)=>void;setScreen:(s:Screen)=>void}){
+ const sm=spaceMember(space,user.id)!
+ const leaders=[...space.members].sort((a,b)=>b.weekly-a.weekly)
+ const ready=activities
+  .filter(activity=>
+   activity.status==='open'&&
+   (activity.assignedTo.length===0||activity.assignedTo.includes(user.id))
+  )
+  .sort((a,b)=>recurrencePriority(a.recurrence)-recurrencePriority(b.recurrence))
+  .slice(0,4)
+ const approvals=activities.filter(activity=>
+  activity.status==='pending'&&activity.approverIds.includes(user.id)
+ )
+ const priorityTreat=data.treats.find(treat=>
+  treat.spaceId===space.id&&
+  treat.status==='locked'&&
+  treat.priorityFor.includes(user.id)
+ )
+ const activeGoal=data.goals
+  .filter(goal=>goal.spaceId===space.id&&goal.status!=='archived'&&goal.status!=='celebrated')
+  .sort((a,b)=>(b.progress/b.target)-(a.progress/a.target))[0]
+
+ return <>
+  <section className="space-overview-grid">
+   <article className="overview-stat-card primary-stat">
+    <small>Your points</small>
+    <strong>{sm.balance}</strong>
+    <span>{sm.weekly} earned this week</span>
+   </article>
+   <article className="overview-stat-card">
+    <small>Ready now</small>
+    <strong>{ready.length}</strong>
+    <span>{ready.length===1?'activity':'activities'} for you</span>
+   </article>
+   {space.poolEnabled&&
+    <article className="overview-stat-card">
+     <small>Shared pool</small>
+     <strong>{space.poolBalance}</strong>
+     <span>Rally points</span>
+    </article>
+   }
+  </section>
+
+  {approvals.length>0&&
+   <section className="attention-panel">
+    <div className="section-title">
+     <div><p className="eyebrow">Needs your attention</p><h2>Review a completion</h2></div>
+    </div>
+    {approvals.slice(0,2).map(activity=>
+     <ActivityCard
+      key={activity.id}
+      a={activity}
+      data={data}
+      user={user}
+      complete={complete}
+      approve={approve}
+      sendBack={sendBack}
+     />
+    )}
+   </section>
+  }
+
+  <section className="panel">
+   <div className="section-title">
+    <div><p className="eyebrow">Up next</p><h2>{ready.length?'Ready for you':'All caught up 🎉'}</h2></div>
+    <button onClick={()=>setScreen('activities')}>See activities →</button>
+   </div>
+   {ready.length
+    ? ready.map(activity=>
+       <ActivityCard
+        key={activity.id}
+        a={activity}
+        data={data}
+        user={user}
+        complete={complete}
+        approve={approve}
+        sendBack={sendBack}
+       />
+      )
+    : <div className="empty friendly-empty">Nothing else is waiting on you in this Rally.</div>
+   }
+  </section>
+
+  {space.members.length>1&&space.weeklyLeaderboard&&
+   <section className="panel compact-leaderboard">
+    <div className="section-title">
+     <div><p className="eyebrow">Weekly race</p><h2>Leaderboard 🏁</h2></div>
+     <button onClick={()=>setScreen('leaderboard')}>Full leaderboard →</button>
+    </div>
+    {leaders.slice(0,4).map((member,index)=>
+     <div className="compact-leader-row" key={member.memberId}>
+      <span>{index===0?'👑':`#${index+1}`}</span>
+      <Avatar member={data.members.find(item=>item.id===member.memberId)!}/>
+      <strong>{memberName(data,member.memberId)}{member.memberId===user.id?' · You':''}</strong>
+      <b>{member.weekly} pts</b>
+     </div>
+    )}
+   </section>
+  }
+
+  <section className="overview-motivation-grid">
+   {activeGoal&&
+    <button className="overview-motivation-card goal-card" onClick={()=>setScreen('goals')}>
+     <span>{activeGoal.icon}</span>
+     <div>
+      <p className="eyebrow">Goal</p>
+      <h3>{activeGoal.name}</h3>
+      <Progress value={activeGoal.progress} max={activeGoal.target}/>
+      <small>{Math.max(0,activeGoal.target-activeGoal.progress)} points to go</small>
+     </div>
+     <b>→</b>
+    </button>
+   }
+
+   {priorityTreat&&
+    <button className="overview-motivation-card treat-card" onClick={()=>setScreen('treats')}>
+     <span>{priorityTreat.icon}</span>
+     <div>
+      <p className="eyebrow">Top treat</p>
+      <h3>{priorityTreat.name}</h3>
+      <Progress value={sm.balance} max={priorityTreat.points}/>
+      <small>{Math.max(0,priorityTreat.points-sm.balance)} points away</small>
+     </div>
+     <b>→</b>
+    </button>
+   }
+  </section>
+
+  {!activeGoal&&!priorityTreat&&
+   <section className="panel gentle-prompt">
+    <div>
+     <p className="eyebrow">Make it motivating</p>
+     <h2>Give these wins somewhere to go.</h2>
+     <p>Add a goal or a treat when you want a little extra motivation.</p>
+    </div>
+    <div>
+     <button className="secondary" onClick={()=>setScreen('goals')}>Add a goal</button>
+     <button className="secondary" onClick={()=>setScreen('treats')}>Add a treat</button>
+    </div>
+   </section>
+  }
+ </>
+}
 
 function Leaderboard({data,space,user}:{data:AppData;space:Space;user:Member}){
  const leaders=[...space.members].sort((a,b)=>b.weekly-a.weekly);const max=Math.max(1,...leaders.map(x=>x.weekly));const me=leaders.find(x=>x.memberId===user.id)!;const leader=leaders[0];const catchup=Math.max(0,leader.weekly-me.weekly+1);const suggestion=data.activities.filter(a=>a.spaceId===space.id&&a.status==='open'&&a.assignedTo.includes(user.id)).sort((a,b)=>b.points-a.points)[0]
@@ -2215,19 +3343,18 @@ function Leaderboard({data,space,user}:{data:AppData;space:Space;user:Member}){
 
 function Stats({data,space}:{data:AppData;space:Space}){
  const hist=data.history.filter(h=>h.spaceId===space.id&&h.kind==='earn');const cats=[...new Set(data.activities.filter(a=>a.spaceId===space.id).map(a=>a.category))]
- return <><section className="stats-hero"><p>▥ STATS</p><h1>How this Rally moves</h1></section><section className="stats-grid"><article className="panel"><h2>Contribution share</h2><div className="pie" style={{background:`conic-gradient(#5b5df0 0 48%,#ff8f70 48% 100%)`}}><span>100%</span></div>{space.members.map(m=>{const pts=hist.filter(h=>h.memberId===m.memberId).reduce((s,h)=>s+h.points,0);const total=hist.reduce((s,h)=>s+h.points,0)||1;return <p key={m.memberId}>{memberName(data,m.memberId)}: <b>{Math.round(pts/total*100)}%</b></p>})}</article><article className="panel"><h2>Category mix</h2>{cats.map(c=>{const ids=data.activities.filter(a=>a.spaceId===space.id&&a.category===c).map(a=>a.id);const pts=hist.filter(h=>h.activityId&&ids.includes(h.activityId)).reduce((s,h)=>s+h.points,0);const total=hist.reduce((s,h)=>s+h.points,0)||1;return <div className="statbar" key={c}><span>{c}</span><Progress value={pts} max={total}/><b>{Math.round(pts/total*100)}%</b></div>})}</article></section></>
+ return <><section className="stats-hero"><p>▥ INSIGHTS</p><h1>How this Rally moves</h1></section><section className="stats-grid"><article className="panel"><h2>Contribution share</h2><div className="pie" style={{background:`conic-gradient(#5b5df0 0 48%,#ff8f70 48% 100%)`}}><span>100%</span></div>{space.members.map(m=>{const pts=hist.filter(h=>h.memberId===m.memberId).reduce((s,h)=>s+h.points,0);const total=hist.reduce((s,h)=>s+h.points,0)||1;return <p key={m.memberId}>{memberName(data,m.memberId)}: <b>{Math.round(pts/total*100)}%</b></p>})}</article><article className="panel"><h2>Category mix</h2>{cats.map(c=>{const ids=data.activities.filter(a=>a.spaceId===space.id&&a.category===c).map(a=>a.id);const pts=hist.filter(h=>h.activityId&&ids.includes(h.activityId)).reduce((s,h)=>s+h.points,0);const total=hist.reduce((s,h)=>s+h.points,0)||1;return <div className="statbar" key={c}><span>{c}</span><Progress value={pts} max={total}/><b>{Math.round(pts/total*100)}%</b></div>})}</article></section></>
 }
 
 function Goals({data,space,user,update,note}:{data:AppData;space:Space;user:Member;update:(d:AppData)=>void;note:(s:string)=>void}){
- const goals=data.goals.filter(
-  g=>g.spaceId===space.id&&g.status!=='archived'
- )
+ const goals=data.goals.filter(g=>g.spaceId===space.id&&g.status!=='archived')
+ const active=goals.filter(g=>g.status!=='celebrated')
+ const celebrated=goals.filter(g=>g.status==='celebrated')
 
  const add=async(e:FormEvent<HTMLFormElement>)=>{
   e.preventDefault()
   const form=e.currentTarget
   const f=new FormData(form)
-
   const goalId=crypto.randomUUID()
   const g:Goal={
    id:goalId,
@@ -2266,77 +3393,74 @@ function Goals({data,space,user,update,note}:{data:AppData;space:Space;user:Memb
  }
 
  const celebrate=async(g:Goal)=>{
-  const {error}=await supabase
-   .from('goals')
-   .update({status:'celebrated'})
-   .eq('id',g.id)
-
+  const {error}=await supabase.from('goals').update({status:'celebrated'}).eq('id',g.id)
   if(error){
    console.error('Unable to celebrate Rally goal:',error)
    note('Unable to update goal.')
    return
   }
-
-  update({
-   ...data,
-   goals:data.goals.map(goal=>
-    goal.id===g.id
-     ? {...goal,status:'celebrated'}
-     : goal
-   )
-  })
+  update({...data,goals:data.goals.map(goal=>goal.id===g.id?{...goal,status:'celebrated'}:goal)})
   note('Goal celebrated! 🎉')
  }
 
  return <>
-  <section className="goal-hero">
+  <section className="page-heading simple-heading rally-page-heading">
    <div>
-    <p>◎ SHARED GOALS</p>
-    <h1>Build toward something together</h1>
-    <span>Active Rally points can move these forward when the activity is set to contribute.</span>
+    <p className="eyebrow">Goals</p>
+    <h1>Build toward something that matters.</h1>
+    <p>Activities that contribute to goals move these forward automatically.</p>
    </div>
-   <span className="huge">🎯</span>
   </section>
 
-  <section className="cards">
-   {goals.map(g=>
-    <article className="goal" key={g.id}>
-     <span>{g.icon}</span>
-     <p className="eyebrow">{g.status}</p>
-     <h2>{g.name}</h2>
-     <Progress value={g.progress} max={g.target}/>
-     <b>{g.progress}/{g.target} points</b>
-     {g.status==='reached'&&
-      <button className="primary" onClick={()=>celebrate(g)}>
-       Mark celebrated
-      </button>
-     }
-    </article>
-   )}
-  </section>
+  {active.length===0
+   ? <section className="panel empty-goal-state">
+      <span>🎯</span>
+      <div><h2>Nothing you’re building toward yet</h2><p>Add a goal when you want your everyday wins to add up to something bigger.</p></div>
+     </section>
+   : <section className="cards rally9-goal-grid">
+      {active.map(g=>
+       <article className={`goal rally9-goal ${g.status}`} key={g.id}>
+        <span>{g.icon}</span>
+        <div className="goal-copy">
+         <p className="eyebrow">{g.status==='reached'?'You did it 🎉':'In progress'}</p>
+         <h2>{g.name}</h2>
+         <Progress value={g.progress} max={g.target}/>
+         <div className="goal-progress-copy">
+          <b>{g.progress.toLocaleString()} / {g.target.toLocaleString()}</b>
+          <small>{Math.max(0,g.target-g.progress).toLocaleString()} points to go</small>
+         </div>
+         {g.status==='reached'&&
+          <button className="primary" onClick={()=>celebrate(g)}>Celebrate this goal 🎉</button>
+         }
+        </div>
+       </article>
+      )}
+     </section>
+  }
 
-  <form className="panel form create-card" onSubmit={add}>
-   <div className="section-title">
-    <div>
-     <p className="eyebrow">Add goal</p>
-     <h2>Create a Rally goal</h2>
+  <details className="panel create-activity-shell goal-create-shell">
+   <summary>＋ New goal</summary>
+   <form className="form rally9-create-form" onSubmit={add}>
+    <div className="two">
+     <label>What are you working toward?<input name="name" required placeholder="Weekend getaway"/></label>
+     <label>Icon<input name="icon" placeholder="🌴"/></label>
     </div>
-    <span className="create-icon">＋</span>
-   </div>
-   <div className="two">
-    <label>Goal name<input name="name" required placeholder="Weekend getaway"/></label>
-    <label>Icon<input name="icon" placeholder="🌴"/></label>
-   </div>
-   <label>
-    Target points
-    <select name="target" defaultValue="1000">
-     {[250,500,750,1000,1500,2000,2500,3000,5000].map(p=>
-      <option key={p} value={p}>{p} points</option>
-     )}
-    </select>
-   </label>
-   <button className="primary">Add goal</button>
-  </form>
+    <label>
+     Target
+     <select name="target" defaultValue="1000">
+      {[250,500,750,1000,1500,2000,2500,3000,5000].map(p=><option key={p} value={p}>{p.toLocaleString()} points</option>)}
+     </select>
+    </label>
+    <button className="primary">Create goal</button>
+   </form>
+  </details>
+
+  {celebrated.length>0&&
+   <section className="panel celebration-shelf">
+    <div className="section-title"><div><p className="eyebrow">Celebrated</p><h2>Goals you reached</h2></div></div>
+    {celebrated.map(g=><div className="history-row" key={g.id}><span>{g.icon}</span><div><strong>{g.name}</strong><small>{g.target.toLocaleString()} point goal</small></div><b>✓</b></div>)}
+   </section>
+  }
  </>
 }
 
@@ -2351,6 +3475,8 @@ function Treats({data,space,user,update,note}:{data:AppData;space:Space;user:Mem
    note(`${t.points-sm.balance} more points needed.`)
    return
   }
+
+  if(!window.confirm(`Get "${t.name}" for ${t.points} points?`)) return
 
   const obtainedAt=new Date().toISOString()
 
@@ -2622,168 +3748,130 @@ function Treats({data,space,user,update,note}:{data:AppData;space:Space;user:Mem
  }
 
  return <>
-  <section className="treat-hero">
+  <section className="page-heading simple-heading rally-page-heading treat-page-heading">
    <div>
-    <p>🎁 TREAT YOURSELF</p>
-    <h1>Something fun to work toward</h1>
-    <span>Create your own motivation or work toward something shared.</span>
+    <p className="eyebrow">Treat Yourself 🎁</p>
+    <h1>Give your progress something fun to unlock.</h1>
+    <p>Available points can be spent here without changing your lifetime progress.</p>
    </div>
-   <span className="huge">✨</span>
+   <div className="page-balance-badge">
+    <strong>{sm.balance}</strong><span>available points</span>
+   </div>
   </section>
 
-  <section className="cards">
-   {locked.map(t=>
-    <article
-     className={`treat ${t.priorityFor.includes(user.id)?'priority':''}`}
-     key={t.id}
-    >
-     <span className="huge">{t.icon}</span>
-     {t.priorityFor.includes(user.id)&&<em>⭐ Top priority</em>}
-     <h2>{t.name}</h2>
-     <p>{t.description}</p>
-     <small>For {t.assignedTo.map(id=>memberName(data,id)).join(', ')}</small>
-     <Progress value={sm.balance} max={t.points}/>
-     <b>{sm.balance}/{t.points}</b>
-     <div>
-      <button className="secondary" onClick={()=>priority(t)}>
-       ☆ Priority
-      </button>
-      <button className="primary" onClick={()=>obtain(t)}>
-       Mark obtained
-      </button>
-     </div>
-    </article>
-   )}
-  </section>
+  {locked.length===0
+   ? <section className="panel empty-goal-state"><span>🎁</span><div><h2>No treats yet</h2><p>Add something small or big that would feel worth working toward.</p></div></section>
+   : <section className="cards rally9-treat-grid">
+      {[...locked]
+       .sort((a,b)=>Number(b.priorityFor.includes(user.id))-Number(a.priorityFor.includes(user.id)))
+       .map(t=>{
+        const isPriority=t.priorityFor.includes(user.id)
+        const canAfford=sm.balance>=t.points
+        return <article className={`treat rally9-treat ${isPriority?'priority':''}`} key={t.id}>
+         <span className="huge">{t.icon}</span>
+         {isPriority&&<em>⭐ Top treat</em>}
+         <h2>{t.name}</h2>
+         {t.description&&<p>{t.description}</p>}
+         {space.members.length>1&&t.assignedTo.length>0&&
+          <small>For {t.assignedTo.map(id=>memberName(data,id)).join(', ')}</small>
+         }
+         <Progress value={sm.balance} max={t.points}/>
+         <div className="treat-progress-copy">
+          <b>{t.points} pts</b>
+          <small>{canAfford?'Ready when you are 🎉':`${t.points-sm.balance} points away`}</small>
+         </div>
+         <div className="treat-actions">
+          {!isPriority&&<button className="secondary" onClick={()=>priority(t)}>☆ Make top treat</button>}
+          <button className="primary" disabled={!canAfford} onClick={()=>obtain(t)}>
+           {canAfford?'Get this treat 🎉':'Keep going'}
+          </button>
+         </div>
+        </article>
+       })}
+     </section>
+  }
 
-  <form className="panel form create-card" onSubmit={add}>
-   <div className="section-title">
-    <div>
-     <p className="eyebrow">Add treat</p>
-     <h2>Create a custom treat</h2>
+  <details className="panel create-activity-shell treat-create-shell">
+   <summary>＋ New treat</summary>
+   <form className="form rally9-create-form" onSubmit={add}>
+    <div className="two">
+     <label>Treat name<input name="name" required placeholder="Dinner out"/></label>
+     <label>Icon<input name="icon" placeholder="🍝"/></label>
     </div>
-    <span className="create-icon">＋</span>
-   </div>
-   <div className="two">
-    <label>Treat name<input name="name" required placeholder="Dinner out"/></label>
-    <label>Icon<input name="icon" placeholder="🍝"/></label>
-   </div>
-   <label>
-    Description
-    <textarea name="description" placeholder="A fun thing to work toward."/>
-   </label>
-   <label>
-    Unlock at
-    <select name="points" defaultValue="500">
-     {[100,150,200,250,300,400,500,750,1000,1500,2000].map(p=>
-      <option key={p} value={p}>{p} points</option>
-     )}
-    </select>
-   </label>
-   <fieldset>
-    <legend>Who is it for?</legend>
-    <div className="people-options">
-     {space.members.map(member=>
-      <label className="check" key={member.memberId}>
-       <input
-        type="checkbox"
-        name="assignedTo"
-        value={member.memberId}
-        defaultChecked={member.memberId===user.id}
-       />
-       {memberName(data,member.memberId)}
-      </label>
-     )}
-    </div>
-   </fieldset>
-   <label className="check">
-    <input type="checkbox" name="priority"/>
-    Make this my top-priority treat
-   </label>
-   <button className="primary">Add treat</button>
-  </form>
+    <label>Description<textarea name="description" placeholder="A fun thing to work toward."/></label>
+    <label>
+     Unlock at
+     <select name="points" defaultValue="500">
+      {[100,150,200,250,300,400,500,750,1000,1500,2000].map(p=><option key={p} value={p}>{p.toLocaleString()} points</option>)}
+     </select>
+    </label>
+    {space.members.length>1&&
+     <fieldset>
+      <legend>Who is it for?</legend>
+      <div className="people-options">
+       {space.members.map(member=>
+        <label className="check" key={member.memberId}>
+         <input type="checkbox" name="assignedTo" value={member.memberId} defaultChecked={member.memberId===user.id}/>
+         {member.memberId===user.id?'Me':memberName(data,member.memberId)}
+        </label>
+       )}
+      </div>
+     </fieldset>
+    }
+    <label className="check"><input type="checkbox" name="priority"/> Make this my top treat</label>
+    <button className="primary">Create treat</button>
+   </form>
+  </details>
 
   {(data.rewardIdeas||[]).length>0&&
-   <section className="panel">
-    <div className="section-title">
-     <div>
-      <p className="eyebrow">Need inspiration?</p>
-      <h2>Rally treat ideas</h2>
-     </div>
-    </div>
+   <details className="panel inspiration-panel">
+    <summary>Need inspiration?</summary>
     <div className="cards">
      {(data.rewardIdeas||[]).slice(0,6).map(idea=>
-      <article className="treat" key={idea.id}>
+      <article className="treat inspiration-card" key={idea.id}>
        <p className="eyebrow">{idea.category}</p>
        <h2>{idea.title}</h2>
        <p>{idea.description}</p>
-       {idea.suggestedPoints&&
-        <small>Suggested: {idea.suggestedPoints} points</small>
-       }
-       <button
-        className="secondary"
-        onClick={()=>window.open(idea.destinationUrl,'_blank')}
-       >
-        Explore idea ↗
-       </button>
+       {idea.suggestedPoints&&<small>Suggested: {idea.suggestedPoints} points</small>}
+       <button className="secondary" onClick={()=>window.open(idea.destinationUrl,'_blank')}>Explore idea ↗</button>
       </article>
      )}
     </div>
-   </section>
+   </details>
   }
 
   {obtained.length>0&&
-   <section className="obtained">
+   <section className="obtained celebration-shelf">
     <h2>Celebration shelf 🎉</h2>
-    {obtained.map(t=>
-     <article key={t.id}>
-      <span>{t.icon}</span>
-      <div>
-       <strong>{t.name}</strong>
-       <small>{formatTimestamp(t.obtainedAt)}</small>
-      </div>
-      <b>✓</b>
-     </article>
-    )}
+    {obtained.map(t=><article key={t.id}><span>{t.icon}</span><div><strong>{t.name}</strong><small>{formatTimestamp(t.obtainedAt)}</small></div><b>✓</b></article>)}
    </section>
   }
  </>
+
 }
 
 function Members({data,space,user,update,note}:{data:AppData;space:Space;user:Member;update:(d:AppData)=>void;note:(s:string)=>void}){
  const role=roleFor(space,user.id)
  const canAdmin=role==='Owner'||role==='Admin'
+ const [inviteOpen,setInviteOpen]=useState(false)
+ const [inviteEmail,setInviteEmail]=useState('')
+ const [inviteRole,setInviteRole]=useState<'member'|'approver'|'admin'>('member')
 
- const invite=async()=>{
+ const invite=async(e:FormEvent<HTMLFormElement>)=>{
+  e.preventDefault()
   if(!canAdmin) return
 
-  const rawEmail=window.prompt(
-   'Enter the email address of the person you want to invite:'
-  )
-  const email=rawEmail?.trim().toLowerCase()
-
+  const email=inviteEmail.trim().toLowerCase()
   if(!email) return
 
-  const rawRole=(window.prompt(
-   'Choose a role: member, approver, or admin',
-   'member'
-  )||'member').trim().toLowerCase()
-
-  const invitedRole=
-   ['member','approver','admin'].includes(rawRole)
-    ? rawRole
-    : 'member'
-
-  const expiresAt=new Date(
-   Date.now()+7*24*60*60*1000
-  ).toISOString()
+  const expiresAt=new Date(Date.now()+7*24*60*60*1000).toISOString()
 
   const {error}=await supabase
    .from('space_invitations')
    .upsert({
     space_id:space.id,
     email,
-    role:invitedRole,
+    role:inviteRole,
     invited_by:user.id,
     status:'pending',
     expires_at:expiresAt
@@ -2797,7 +3885,44 @@ function Members({data,space,user,update,note}:{data:AppData;space:Space;user:Me
    return
   }
 
-  note('Invitation created. They will join when they sign in with that email.')
+  setInviteEmail('')
+  setInviteRole('member')
+  setInviteOpen(false)
+  note('Invitation created. They’ll join when they sign in with that email.')
+ }
+
+ const changeRole=async(id:string,nextRole:Role)=>{
+  if(!canAdmin||id===user.id||nextRole==='Owner') return
+  const target=space.members.find(member=>member.memberId===id)
+  if(!target||target.role==='Owner') return
+
+  const dbRole=nextRole.toLowerCase()
+  const {error}=await supabase
+   .from('space_members')
+   .update({role:dbRole})
+   .eq('space_id',space.id)
+   .eq('user_id',id)
+
+  if(error){
+   console.error('Unable to update member role:',error)
+   note('Unable to update role.')
+   return
+  }
+
+  update({
+   ...data,
+   spaces:data.spaces.map(item=>
+    item.id!==space.id
+     ? item
+     : {
+        ...item,
+        members:item.members.map(member=>
+         member.memberId===id ? {...member,role:nextRole} : member
+        )
+       }
+   )
+  })
+  note('Member role updated.')
  }
 
  const remove=async(id:string)=>{
@@ -2808,6 +3933,8 @@ function Members({data,space,user,update,note}:{data:AppData;space:Space;user:Me
    note('The Rally owner cannot be removed.')
    return
   }
+
+  if(!window.confirm(`Remove ${memberName(data,id)} from ${space.name}?`)) return
 
   const {error}=await supabase
    .from('space_members')
@@ -2823,13 +3950,10 @@ function Members({data,space,user,update,note}:{data:AppData;space:Space;user:Me
 
   update({
    ...data,
-   spaces:data.spaces.map(s=>
-    s.id!==space.id
-     ? s
-     : {
-        ...s,
-        members:s.members.filter(member=>member.memberId!==id)
-       }
+   spaces:data.spaces.map(item=>
+    item.id!==space.id
+     ? item
+     : {...item,members:item.members.filter(member=>member.memberId!==id)}
    )
   })
 
@@ -2837,34 +3961,88 @@ function Members({data,space,user,update,note}:{data:AppData;space:Space;user:Me
  }
 
  return <>
-  <section className="panel">
-   <div className="section-title">
-    <div>
-     <p className="eyebrow">Rally members</p>
-     <h2>{space.name}</h2>
-    </div>
-    {canAdmin&&
-     <button className="primary" onClick={invite}>
-      Invite member
-     </button>
-    }
+  <section className="page-heading simple-heading rally-page-heading">
+   <div>
+    <p className="eyebrow">Members</p>
+    <h1>Who’s in this Rally?</h1>
+    <p>Roles only show management options when they’re actually relevant.</p>
    </div>
+   {canAdmin&&
+    <button className="primary" onClick={()=>setInviteOpen(current=>!current)}>
+     + Invite someone
+    </button>
+   }
+  </section>
 
-   {space.members.map(member=>
-    <div className="member-row" key={member.memberId}>
-     <Avatar member={data.members.find(x=>x.id===member.memberId)!}/>
-     <div>
-      <strong>{memberName(data,member.memberId)}</strong>
-      <small>{member.role} · joined {formatTimestamp(member.joinedAt)}</small>
+  {inviteOpen&&
+   <form className="panel invite-form" onSubmit={invite}>
+    <div className="section-title">
+     <div><p className="eyebrow">Invite someone</p><h2>Add them to {space.name}</h2></div>
+     <button type="button" onClick={()=>setInviteOpen(false)}>Cancel</button>
+    </div>
+    <div className="two">
+     <label>
+      Email
+      <input
+       type="email"
+       required
+       value={inviteEmail}
+       onChange={e=>setInviteEmail(e.target.value)}
+       placeholder="name@example.com"
+      />
+     </label>
+     <label>
+      Role
+      <select value={inviteRole} onChange={e=>setInviteRole(e.target.value as typeof inviteRole)}>
+       <option value="member">Member</option>
+       <option value="approver">Approver</option>
+       <option value="admin">Admin</option>
+      </select>
+     </label>
+    </div>
+    <div className="role-explainer">
+     {inviteRole==='member'&&<span><b>Member</b> · participates normally in the Rally.</span>}
+     {inviteRole==='approver'&&<span><b>Approver</b> · can approve activities they’re selected to review.</span>}
+     {inviteRole==='admin'&&<span><b>Admin</b> · can manage Rally activities, members, and settings.</span>}
+    </div>
+    <button className="primary">Create invite</button>
+   </form>
+  }
+
+  <section className="panel member-list-panel">
+   {space.members.map(member=>{
+    const person=data.members.find(x=>x.id===member.memberId)
+    if(!person) return null
+    const editable=canAdmin&&member.memberId!==user.id&&member.role!=='Owner'
+
+    return <article className="member-card-row" key={member.memberId}>
+     <Avatar member={person}/>
+     <div className="member-card-copy">
+      <strong>{person.name}{member.memberId===user.id?' · You':''}</strong>
+      <small>Joined {formatTimestamp(member.joinedAt)}</small>
      </div>
-     <span>{member.weekly} pts this week</span>
-     {canAdmin&&member.memberId!==user.id&&member.role!=='Owner'&&
-      <button className="danger" onClick={()=>remove(member.memberId)}>
+     <div className="member-weekly">
+      <b>{member.weekly}</b><small>pts this week</small>
+     </div>
+     {editable
+      ? <select
+         className="member-role-select"
+         value={member.role}
+         onChange={e=>changeRole(member.memberId,e.target.value as Role)}
+        >
+         <option value="Member">Member</option>
+         <option value="Approver">Approver</option>
+         <option value="Admin">Admin</option>
+        </select>
+      : <span className="role">{member.role}</span>
+     }
+     {editable&&
+      <button className="danger member-remove" onClick={()=>remove(member.memberId)}>
        Remove
       </button>
      }
-    </div>
-   )}
+    </article>
+   })}
   </section>
  </>
 }
@@ -3136,8 +4314,9 @@ function SpaceSettings({data,space,user,update,note}:{data:AppData;space:Space;u
  </>
 }
 
-function Community({data,user,spaces,update,note}:{data:AppData;user:Member;spaces:Space[];update:(d:AppData)=>void;note:(s:string)=>void}){
+function Community({data,user,spaces,update,note,setScreen}:{data:AppData;user:Member;spaces:Space[];update:(d:AppData)=>void;note:(s:string)=>void;setScreen:(s:Screen)=>void}){
  const [target,setTarget]=useState(spaces[0]?.id||'')
+ const [tab,setTab]=useState<'challenges'|'friends'>('challenges')
 
  useEffect(()=>{
   if(!target&&spaces[0]?.id) setTarget(spaces[0].id)
@@ -3167,7 +4346,6 @@ function Community({data,user,spaces,update,note}:{data:AppData;user:Member;spac
   }
 
   const activityId=crypto.randomUUID()
-
   const a:Activity={
    id:activityId,
    spaceId:s.id,
@@ -3186,7 +4364,11 @@ function Community({data,user,spaces,update,note}:{data:AppData;user:Member;spac
    contributesToGoals:true,
    pointDestination:'personal',
    version:1,
-   createdBy:user.id
+   createdBy:user.id,
+   createdAt:new Date().toISOString(),
+   periodProgress:0,
+   periodTarget:1,
+   periodLabel:'One time'
   }
 
   const {error:activityError}=await supabase
@@ -3217,20 +4399,11 @@ function Community({data,user,spaces,update,note}:{data:AppData;user:Member;spac
 
   const {error:assignmentError}=await supabase
    .from('activity_assignments')
-   .insert({
-    activity_id:activityId,
-    user_id:user.id
-   })
+   .insert({activity_id:activityId,user_id:user.id})
 
   if(assignmentError){
-   console.error(
-    'Unable to assign challenge activity:',
-    assignmentError
-   )
-   await supabase
-    .from('activities')
-    .update({status:'archived'})
-    .eq('id',activityId)
+   console.error('Unable to assign challenge activity:',assignmentError)
+   await supabase.from('activities').update({status:'archived'}).eq('id',activityId)
    note('Unable to join challenge.')
    return
   }
@@ -3246,10 +4419,7 @@ function Community({data,user,spaces,update,note}:{data:AppData;user:Member;spac
 
   if(joinError){
    console.error('Unable to save challenge join:',joinError)
-   await supabase
-    .from('activities')
-    .update({status:'archived'})
-    .eq('id',activityId)
+   await supabase.from('activities').update({status:'archived'}).eq('id',activityId)
    note('Unable to join challenge.')
    return
   }
@@ -3259,10 +4429,7 @@ function Community({data,user,spaces,update,note}:{data:AppData;user:Member;spac
    activities:[a,...data.activities],
    challenges:data.challenges.map(challenge=>
     challenge.id===c.id
-     ? {
-        ...challenge,
-        joins:[...new Set([...challenge.joins,user.id])]
-       }
+     ? {...challenge,joins:[...new Set([...challenge.joins,user.id])]}
      : challenge
    )
   })
@@ -3275,11 +4442,7 @@ function Community({data,user,spaces,update,note}:{data:AppData;user:Member;spac
 
   const {data:saved,error}=await supabase
    .from('challenge_comments')
-   .insert({
-    challenge_id:c.id,
-    user_id:user.id,
-    comment:text.trim()
-   })
+   .insert({challenge_id:c.id,user_id:user.id,comment:text.trim()})
    .select('id')
    .single()
 
@@ -3295,98 +4458,94 @@ function Community({data,user,spaces,update,note}:{data:AppData;user:Member;spac
     challenge.id===c.id
      ? {
         ...challenge,
-        comments:[
-         ...challenge.comments,
-         {
-          id:saved.id,
-          memberId:user.id,
-          text:text.trim()
-         }
-        ]
+        comments:[...challenge.comments,{id:saved.id,memberId:user.id,text:text.trim()}]
        }
      : challenge
    )
   })
  }
 
+ const connected=data.friends.filter(friend=>friend.status==='connected')
+ const pending=data.friends.filter(friend=>friend.status==='pending')
+
  return <>
-  <section className="community-hero">
-   <p>◉ COMMUNITY</p>
-   <h1>Challenges, friends, and shared wins</h1>
-   <span>Your private Rally data stays private unless you choose to share an accomplishment.</span>
-  </section>
-
-  <section className="friend-strip">
+  <section className="page-heading simple-heading community-heading">
    <div>
-    <h2>Friends</h2>
-    <p>Connected: {data.friends.filter(f=>f.status==='connected').length}</p>
+    <p className="eyebrow">Community</p>
+    <h1>Shared wins, without the pressure.</h1>
+    <p>Challenges and friends are here when they make Rally more fun.</p>
    </div>
-   {data.friends
-    .filter(f=>f.status==='connected')
-    .map(friend=>{
-     const member=data.members.find(m=>m.id===friend.memberId)
-     return member ? <Avatar key={friend.memberId} member={member}/> : null
-    })
-   }
-   <button className="plus">＋</button>
   </section>
 
-  <label className="target">
-   Join challenges in
-   <select value={target} onChange={e=>setTarget(e.target.value)}>
-    {spaces.map(s=>
-     <option value={s.id} key={s.id}>
-      {s.icon} {s.name}
-     </option>
-    )}
-   </select>
-  </label>
+  <div className="segmented community-tabs">
+   <button className={tab==='challenges'?'active':''} onClick={()=>setTab('challenges')}>Challenges</button>
+   <button className={tab==='friends'?'active':''} onClick={()=>setTab('friends')}>Friends</button>
+  </div>
 
-  <section className="community-grid">
-   {data.challenges.map(c=>
-    <article className="challenge" key={c.id}>
-     <span className="huge">{c.icon}</span>
-     <h2>{c.title}</h2>
-     <p>{c.description}</p>
-     <b>+{c.points} pts</b>
-     <button className="primary" onClick={()=>join(c)}>
-      Join challenge
-     </button>
+  {tab==='friends'&&<>
+   <section className="panel">
+    <div className="section-title">
+     <div><p className="eyebrow">Your circle</p><h2>Friends</h2></div>
+     <button onClick={()=>setScreen('friends')}>Manage friends →</button>
+    </div>
 
-     {c.completedBy.includes(user.id)
-      ? <button className="celebrate">🎉 Celebrate</button>
-      : <small>🎉 unlocks after you complete it</small>
-     }
-
-     <div className="comments">
-      {c.comments.map(cm=>
-       <p key={cm.id}>
-        <b>{memberName(data,cm.memberId)}:</b> {cm.text}
-       </p>
-      )}
-      <CommentBox onSend={text=>comment(c,text)}/>
+    {pending.length>0&&
+     <div className="friend-request-summary">
+      <strong>{pending.length} pending {pending.length===1?'request':'requests'}</strong>
+      <button className="secondary" onClick={()=>setScreen('friends')}>Review</button>
      </div>
-    </article>
-   )}
-  </section>
-
-  <section className="panel">
-   <h2>Share an accomplishment</h2>
-   <p>Create a share card for Facebook, messages, or anywhere else. Rally never includes a private Rally name unless you choose to add it.</p>
-   <button
-    className="primary"
-    onClick={()=>
-     navigator.share
-      ? navigator.share({
-         title:'My Rally win',
-         text:'I just hit a new Rally milestone! 🎉'
-        })
-      : window.open('https://www.facebook.com/sharer/sharer.php','_blank')
     }
-   >
-    Share a win ↗
-   </button>
-  </section>
+
+    {connected.length===0
+     ? <div className="empty friendly-empty">No connected friends yet. Rally still works perfectly on your own.</div>
+     : <div className="community-friend-grid">
+        {connected.map(friend=>{
+         const member=data.members.find(m=>m.id===friend.memberId)
+         if(!member) return null
+         return <article className="community-friend-card" key={friend.memberId}>
+          <Avatar member={member}/>
+          <div><strong>{member.name}</strong><small>{member.tier} · {member.globalLifetime.toLocaleString()} lifetime pts</small></div>
+         </article>
+        })}
+       </div>
+    }
+   </section>
+  </>}
+
+  {tab==='challenges'&&<>
+   <label className="target community-target">
+    <span>When you join, add it to</span>
+    <select value={target} onChange={e=>setTarget(e.target.value)}>
+     {spaces.map(s=><option value={s.id} key={s.id}>{s.icon} {s.name}</option>)}
+    </select>
+   </label>
+
+   <section className="community-grid rally9-community-grid">
+    {data.challenges.length===0&&
+     <div className="empty friendly-empty">No challenges are live right now.</div>
+    }
+    {data.challenges.map(c=>
+     <article className="challenge rally9-challenge" key={c.id}>
+      <span className="huge">{c.icon}</span>
+      <p className="eyebrow">{c.category}</p>
+      <h2>{c.title}</h2>
+      <p>{c.description}</p>
+      <b>+{c.points} pts</b>
+      <button className="primary" onClick={()=>join(c)}>
+       {c.joins.includes(user.id)?'Add to another Rally':'Join challenge'}
+      </button>
+      {c.completedBy.includes(user.id)&&<span className="challenge-complete">🎉 You completed this challenge</span>}
+      <details className="challenge-comments">
+       <summary>{c.comments.length} {c.comments.length===1?'comment':'comments'}</summary>
+       <div className="comments">
+        {c.comments.map(cm=><p key={cm.id}><b>{memberName(data,cm.memberId)}:</b> {cm.text}</p>)}
+        <CommentBox onSend={text=>comment(c,text)}/>
+       </div>
+      </details>
+     </article>
+    )}
+   </section>
+  </>}
  </>
 }
 
@@ -3394,13 +4553,11 @@ function CommentBox({onSend}:{onSend:(t:string)=>void}){const [t,setT]=useState(
 
 
 
-function Profile({data,user,spaces,update,note,setSpaceId,setScreen}:{data:AppData;user:Member;spaces:Space[];update:(d:AppData)=>void;note:(s:string)=>void;setSpaceId:(id:string)=>void;setScreen:(s:Screen)=>void}){
+function Profile({data,user,spaces,update,note,setSpaceId,setScreen,logout}:{data:AppData;user:Member;spaces:Space[];update:(d:AppData)=>void;note:(s:string)=>void;setSpaceId:(id:string)=>void;setScreen:(s:Screen)=>void;logout:()=>void|Promise<void>}){
  const totalBalance=spaces.reduce((sum,s)=>sum+(spaceMember(s,user.id)?.balance||0),0)
  const totalWeekly=spaces.reduce((sum,s)=>sum+(spaceMember(s,user.id)?.weekly||0),0)
  const totalCompleted=data.history.filter(h=>h.memberId===user.id&&h.kind==='earn').length
- const totalTreats=data.treats.filter(t=>t.obtainedBy===user.id).length
- const pendingApprovals=data.activities.filter(a=>a.status==='pending'&&a.approverIds.includes(user.id)).length
- const prefs=data.notificationPrefs[user.id]||{leaderboard:true,approvals:true,milestones:true,tiers:true,daily:false,community:true}
+ const recentWins=data.history.filter(h=>h.memberId===user.id&&h.kind==='earn').slice(0,5)
 
  const upload=async(e:ChangeEvent<HTMLInputElement>)=>{
   const file=e.target.files?.[0]
@@ -3437,96 +4594,89 @@ function Profile({data,user,spaces,update,note,setSpaceId,setScreen}:{data:AppDa
   update({
    ...data,
    members:data.members.map(member=>
-    member.id===user.id
-     ? {...member,avatar:avatarUrl}
-     : member
+    member.id===user.id ? {...member,avatar:avatarUrl} : member
    )
   })
 
   note('Profile photo updated.')
  }
 
- const setPref=async(key:keyof NotificationPref,val:boolean)=>{
-  const nextPrefs={...prefs,[key]:val}
-
-  const {error}=await supabase
-   .from('notification_preferences')
-   .upsert({
-    user_id:user.id,
-    leaderboard_changes:nextPrefs.leaderboard,
-    approval_requests:nextPrefs.approvals,
-    point_milestones:nextPrefs.milestones,
-    tier_unlocks:nextPrefs.tiers,
-    daily_kickoff:nextPrefs.daily,
-    community_activity:nextPrefs.community
-   },{
-    onConflict:'user_id'
-   })
-
-  if(error){
-   console.error('Unable to save notification preference:',error)
-   note('Unable to update notification preference.')
-   return
-  }
-
-  update({
-   ...data,
-   notificationPrefs:{
-    ...data.notificationPrefs,
-    [user.id]:nextPrefs
-   }
-  })
- }
  return <>
-  <section className="profile-hero">
-   <div className="profile-photo-wrap"><Avatar member={user}/><label className="photo-button">Change photo<input type="file" accept="image/*" onChange={upload}/></label></div>
-   <div><p className="eyebrow light">Your Rally profile</p><h1>{user.name}</h1><p>{user.tier} tier · {user.globalLifetime.toLocaleString()} global lifetime points</p></div>
+  <section className="profile-hero rally9-profile-hero">
+   <div className="profile-photo-wrap">
+    <Avatar member={user}/>
+    <label className="photo-button">
+     Change photo
+     <input type="file" accept="image/*" onChange={upload}/>
+    </label>
+   </div>
+   <div>
+    <p className="eyebrow light">Your Rally profile</p>
+    <h1>{user.name}</h1>
+    <p>{user.tier} tier · {user.globalLifetime.toLocaleString()} lifetime points</p>
+   </div>
   </section>
 
-  <section className="profile-stat-grid">
-   <article><small>Available across spaces</small><strong>{totalBalance}</strong><span>points</span></article>
+  <section className="profile-stat-grid rally9-profile-stats">
+   <article><small>Available</small><strong>{totalBalance}</strong><span>across Rallies</span></article>
    <article><small>This week</small><strong>{totalWeekly}</strong><span>points earned</span></article>
-   <article><small>Activities completed</small><strong>{totalCompleted}</strong><span>all time</span></article>
-   <article><small>Pending approvals</small><strong>{pendingApprovals}</strong><span>waiting on you</span></article>
+   <article><small>Your wins</small><strong>{totalCompleted}</strong><span>completed activities</span></article>
+   <article><small>Rallies</small><strong>{spaces.length}</strong><span>spaces you’re in</span></article>
   </section>
 
-  <section className="profile-control-grid">
-   <button className="profile-control-card purple" onClick={()=>setScreen('notifications')}><span>🔔</span><div><strong>Notifications</strong><small>Alerts, approvals, competition, milestones, tiers, and daily kickoff.</small></div><b>→</b></button>
-   <button className="profile-control-card teal" onClick={()=>setScreen('activity-settings')}><span>✓</span><div><strong>Activity settings</strong><small>Pause, archive, restore, delete, approvals, and Rally activity management.</small></div><b>→</b></button>
-   <button className="profile-control-card coral" onClick={()=>setScreen('friends')}><span>👥</span><div><strong>Friends & Community</strong><small>Friends, challenges, comments, and shared accomplishments.</small></div><b>→</b></button>
-   <button className="profile-control-card gold" onClick={()=>setScreen('plan')}><span>✦</span><div><strong>Plan & Rally capacity</strong><small>See member, activity, treat, and goal capacity for your Rally Spaces.</small></div><b>→</b></button>
-   <button className="profile-control-card blue" onClick={()=>setScreen('account-settings')}><span>⚙️</span><div><strong>Account preferences</strong><small>Profile, competition preferences, privacy defaults, and account-wide options.</small></div><b>→</b></button>
-   <button className="profile-control-card pink" onClick={()=>{setSpaceId('all');setScreen('home')}}><span>🌈</span><div><strong>All My Rally</strong><small>Your combined command center across every Rally Space.</small></div><b>→</b></button>
-  </section>
-
-  <section className="panel">
-   <div className="section-title"><div><p className="eyebrow">Quick notification controls</p><h2>What should Rally tell you about?</h2></div><button className="text-link" onClick={()=>setScreen('notifications')}>Full settings →</button></div>
-   <div className="profile-pref-grid">
-    <label className="pref-tile"><span>🏁 <b>Leaderboard changes</b></span><input type="checkbox" checked={prefs.leaderboard} onChange={e=>setPref('leaderboard',e.target.checked)}/></label>
-    <label className="pref-tile"><span>👀 <b>Approval requests</b></span><input type="checkbox" checked={prefs.approvals} onChange={e=>setPref('approvals',e.target.checked)}/></label>
-    <label className="pref-tile"><span>🎯 <b>Point milestones</b></span><input type="checkbox" checked={prefs.milestones} onChange={e=>setPref('milestones',e.target.checked)}/></label>
-    <label className="pref-tile"><span>💎 <b>New tiers</b></span><input type="checkbox" checked={prefs.tiers} onChange={e=>setPref('tiers',e.target.checked)}/></label>
-    <label className="pref-tile"><span>☀️ <b>Daily kickoff</b></span><input type="checkbox" checked={prefs.daily} onChange={e=>setPref('daily',e.target.checked)}/></label>
-    <label className="pref-tile"><span>◉ <b>Community activity</b></span><input type="checkbox" checked={prefs.community} onChange={e=>setPref('community',e.target.checked)}/></label>
+  <section className="panel profile-menu-panel">
+   <div className="section-title">
+    <div><p className="eyebrow">Settings</p><h2>Your account</h2></div>
+   </div>
+   <div className="profile-menu-list">
+    <button onClick={()=>setScreen('account-settings')}><span>⚙️</span><div><strong>Account & profile</strong><small>Name, defaults, privacy, and competition preferences</small></div><b>→</b></button>
+    <button onClick={()=>setScreen('notifications')}><span>🔔</span><div><strong>Notifications</strong><small>What Rally tells you about and when</small></div><b>→</b></button>
+    <button onClick={()=>setScreen('friends')}><span>👥</span><div><strong>Friends</strong><small>Requests and connected friends</small></div><b>→</b></button>
+    <button onClick={()=>setScreen('plan')}><span>✦</span><div><strong>Plan & billing</strong><small>Your current Rally plan and space usage</small></div><b>→</b></button>
    </div>
   </section>
 
   <section className="panel">
-   <div className="section-title"><div><p className="eyebrow">Your spaces</p><h2>Rally memberships & admin tools</h2></div></div>
-   {spaces.map(s=>{const sm=spaceMember(s,user.id)!;const canManage=sm.role==='Owner'||sm.role==='Admin';return <div className="profile-space-wrap" key={s.id}><button className="profile-space-row" onClick={()=>{setSpaceId(s.id);setScreen('home')}}><span className="space-icon">{s.icon}</span><div><strong>{s.name}</strong><small>{sm.role} · {sm.balance} available · {sm.weekly} this week</small></div><b>→</b></button>{canManage&&<button className="mini-settings" onClick={()=>{setSpaceId(s.id);setScreen('settings')}}>⚙️ Manage Rally</button>}</div>})}
+   <div className="section-title">
+    <div><p className="eyebrow">Your Rallies</p><h2>Spaces you belong to</h2></div>
+   </div>
+   <div className="profile-rally-list">
+    {spaces.map(space=>{
+     const sm=spaceMember(space,user.id)!
+     return <button
+      className="profile-rally-row"
+      key={space.id}
+      onClick={()=>{setSpaceId(space.id);setScreen('home')}}
+     >
+      <span className="space-icon">{space.icon}</span>
+      <div>
+       <strong>{space.name}</strong>
+       <small>{sm.role} · {sm.weekly} pts this week</small>
+      </div>
+      <b>→</b>
+     </button>
+    })}
+   </div>
   </section>
 
-  <section className="panel">
-   <div className="section-title"><div><p className="eyebrow">Your progress</p><h2>Recent Rally history</h2></div></div>
-   {data.history.filter(h=>h.memberId===user.id).slice(0,12).map(h=><div className="history-row" key={h.id}><span>{data.spaces.find(s=>s.id===h.spaceId)?.icon||'✦'}</span><div><strong>{h.title}</strong><small>{h.detail} · {h.createdAt}</small></div><b>{h.kind==='earn'?'+':h.kind==='undo'?'-':''}{h.points}</b></div>)}
-  </section>
+  {recentWins.length>0&&
+   <section className="panel">
+    <div className="section-title">
+     <div><p className="eyebrow">Recent wins</p><h2>Your progress</h2></div>
+    </div>
+    {recentWins.map(history=>
+     <div className="history-row" key={history.id}>
+      <span>{data.spaces.find(s=>s.id===history.spaceId)?.icon||'✦'}</span>
+      <div><strong>{history.title}</strong><small>{history.createdAt}</small></div>
+      <b>+{history.points}</b>
+     </div>
+    )}
+   </section>
+  }
 
-  <section className="panel profile-account-summary">
-   <div><span>🎁</span><strong>{totalTreats}</strong><small>Treats obtained</small></div>
-   <div><span>🌟</span><strong>{user.globalLifetime.toLocaleString()}</strong><small>Global lifetime points</small></div>
-   <div><span>🏠</span><strong>{spaces.length}</strong><small>Rally Spaces</small></div>
-  </section>
- </>}
+  <button className="profile-logout" onClick={()=>logout()}>Log out</button>
+ </>
+}
 
 function AccountSettings({data,user,update,note}:{data:AppData;user:Member;update:(d:AppData)=>void;note:(s:string)=>void}){
  const prefs:AccountPreferences=data.accountPrefs||{
@@ -3679,74 +4829,67 @@ function ActivitySettingsIndex({data,user,spaces,setSpaceId,setScreen}:{data:App
 }
 
 function PlanSettings({data,user,spaces,setSpaceId,setScreen}:{data:AppData;user:Member;spaces:Space[];setSpaceId:(id:string)=>void;setScreen:(s:Screen)=>void}){
- const managed=spaces.filter(
-  s=>['Owner','Admin'].includes(roleFor(s,user.id)||'')
- )
+ const managed=spaces.filter(s=>['Owner','Admin'].includes(roleFor(s,user.id)||''))
  const plan=data.subscription?.plan || 'free'
+ const status=data.subscription?.status || 'active'
 
  return <>
-  <section className="plan-hero">
+  <section className="page-heading simple-heading plan-page-heading">
    <div>
-    <p>✦ PLAN & RALLY CAPACITY</p>
-    <h1>{plan.toUpperCase()} plan</h1>
-    <span>These are product capacity limits — never limits on how many points a person is allowed to earn.</span>
+    <p className="eyebrow">Plan & billing</p>
+    <h1>{plan.charAt(0).toUpperCase()+plan.slice(1)} plan</h1>
+    <p>Your plan is {status}. Rally only surfaces limits when they matter.</p>
    </div>
   </section>
 
-  <section className="capacity-grid">
-   <article><strong>Members</strong><span>People who can belong to a Rally Space</span></article>
-   <article><strong>Activities</strong><span>Active activities configured in a Rally</span></article>
-   <article><strong>Treats</strong><span>Active Treat Yourself goals</span></article>
-   <article><strong>Goals</strong><span>Shared Rally goals</span></article>
+  <section className="panel plan-summary-card">
+   <div>
+    <span className="plan-mark">✦</span>
+    <div><strong>{plan.toUpperCase()}</strong><small>{status}</small></div>
+   </div>
+   {data.subscription?.currentPeriodEnd&&
+    <small>Current period ends {formatTimestamp(data.subscription.currentPeriodEnd)}</small>
+   }
   </section>
 
-  <section className="panel">
-   <div className="section-title">
-    <div>
-     <p className="eyebrow">Admin access</p>
-     <h2>Your managed Rally Spaces</h2>
+  {managed.length>0&&
+   <details className="panel plan-usage-details">
+    <summary>Rally usage</summary>
+    <div className="profile-rally-list">
+     {managed.map(space=>
+      <button
+       className="profile-rally-row"
+       key={space.id}
+       onClick={()=>{setSpaceId(space.id);setScreen('settings')}}
+      >
+       <span className="space-icon">{space.icon}</span>
+       <div>
+        <strong>{space.name}</strong>
+        <small>
+         {space.members.length} members · {data.activities.filter(a=>a.spaceId===space.id&&a.status!=='archived').length} activities · {data.treats.filter(t=>t.spaceId===space.id&&t.status==='locked').length} treats · {data.goals.filter(g=>g.spaceId===space.id&&g.status==='active').length} goals
+        </small>
+       </div>
+       <b>Manage →</b>
+      </button>
+     )}
     </div>
-   </div>
-
-   {managed.map(s=>
-    <button
-     className="settings-index-row"
-     key={s.id}
-     onClick={()=>{
-      setSpaceId(s.id)
-      setScreen('settings')
-     }}
-    >
-     <span className="space-icon">{s.icon}</span>
-     <div>
-      <strong>{s.name}</strong>
-      <small>
-       {s.members.length} members · {' '}
-       {data.activities.filter(a=>a.spaceId===s.id&&a.status!=='archived').length} activities · {' '}
-       {data.treats.filter(t=>t.spaceId===s.id&&t.status==='locked').length} active treats · {' '}
-       {data.goals.filter(g=>g.spaceId===s.id&&g.status==='active').length} goals
-      </small>
-     </div>
-     <b>Manage →</b>
-    </button>
-   )}
-  </section>
+   </details>
+  }
  </>
 }
 
 function FriendsSettings({data,user,update,note}:{data:AppData;user:Member;update:(d:AppData)=>void;note:(s:string)=>void}){
  const connected=data.friends.filter(f=>f.status==='connected')
  const pending=data.friends.filter(f=>f.status==='pending')
+ const [email,setEmail]=useState('')
 
- const addFriend=async()=>{
-  const email=window.prompt(
-   'Enter the exact email address your friend uses for Rally:'
-  )?.trim().toLowerCase()
-
-  if(!email) return
+ const addFriend=async(e:FormEvent<HTMLFormElement>)=>{
+  e.preventDefault()
+  const normalized=email.trim().toLowerCase()
+  if(!normalized) return
 
   const {data:matches,error:findError}=await supabase
-   .rpc('find_profile_by_email',{search_email:email})
+   .rpc('find_profile_by_email',{search_email:normalized})
 
   if(findError){
    console.error('Unable to find Rally user:',findError)
@@ -3764,9 +4907,7 @@ function FriendsSettings({data,user,update,note}:{data:AppData;user:Member;updat
   const {data:existing,error:existingError}=await supabase
    .from('friendships')
    .select('id, requester_id, addressee_id, status')
-   .or(
-    `and(requester_id.eq.${user.id},addressee_id.eq.${target.id}),and(requester_id.eq.${target.id},addressee_id.eq.${user.id})`
-   )
+   .or(`and(requester_id.eq.${user.id},addressee_id.eq.${target.id}),and(requester_id.eq.${target.id},addressee_id.eq.${user.id})`)
    .in('status',['pending','accepted'])
    .limit(1)
 
@@ -3777,21 +4918,13 @@ function FriendsSettings({data,user,update,note}:{data:AppData;user:Member;updat
   }
 
   if(existing?.length){
-   note(
-    existing[0].status==='accepted'
-     ? 'You are already friends.'
-     : 'A friend request is already pending.'
-   )
+   note(existing[0].status==='accepted'?'You are already friends.':'A friend request is already pending.')
    return
   }
 
   const {data:friendship,error}=await supabase
    .from('friendships')
-   .insert({
-    requester_id:user.id,
-    addressee_id:target.id,
-    status:'pending'
-   })
+   .insert({requester_id:user.id,addressee_id:target.id,status:'pending'})
    .select('id')
    .single()
 
@@ -3811,159 +4944,86 @@ function FriendsSettings({data,user,update,note}:{data:AppData;user:Member;updat
 
   update({
    ...data,
-   members:data.members.some(member=>member.id===target.id)
-    ? data.members
-    : [...data.members,targetMember],
-   friends:[
-    ...data.friends,
-    {
-     memberId:target.id,
-     status:'pending',
-     friendshipId:friendship.id,
-     requesterId:user.id
-    }
-   ]
+   members:data.members.some(member=>member.id===target.id)?data.members:[...data.members,targetMember],
+   friends:[...data.friends,{memberId:target.id,status:'pending',friendshipId:friendship.id,requesterId:user.id}]
   })
 
+  setEmail('')
   note('Friend request sent.')
  }
 
  const accept=async(friend:Friend)=>{
   if(!friend.friendshipId) return
-
-  const {error}=await supabase
-   .from('friendships')
-   .update({status:'accepted'})
-   .eq('id',friend.friendshipId)
-
-  if(error){
-   console.error('Unable to accept friend request:',error)
-   note('Unable to accept friend request.')
-   return
-  }
-
-  update({
-   ...data,
-   friends:data.friends.map(item=>
-    item.friendshipId===friend.friendshipId
-     ? {...item,status:'connected'}
-     : item
-   )
-  })
-
+  const {error}=await supabase.from('friendships').update({status:'accepted'}).eq('id',friend.friendshipId)
+  if(error){console.error('Unable to accept friend request:',error);note('Unable to accept friend request.');return}
+  update({...data,friends:data.friends.map(item=>item.friendshipId===friend.friendshipId?{...item,status:'connected'}:item)})
   note('Friend added.')
  }
 
  const decline=async(friend:Friend)=>{
   if(!friend.friendshipId) return
-
-  const {error}=await supabase
-   .from('friendships')
-   .update({status:'declined'})
-   .eq('id',friend.friendshipId)
-
-  if(error){
-   console.error('Unable to decline friend request:',error)
-   note('Unable to decline friend request.')
-   return
-  }
-
-  update({
-   ...data,
-   friends:data.friends.filter(
-    item=>item.friendshipId!==friend.friendshipId
-   )
-  })
-
+  const {error}=await supabase.from('friendships').update({status:'declined'}).eq('id',friend.friendshipId)
+  if(error){console.error('Unable to decline friend request:',error);note('Unable to decline friend request.');return}
+  update({...data,friends:data.friends.filter(item=>item.friendshipId!==friend.friendshipId)})
   note('Friend request declined.')
  }
 
  const remove=async(friend:Friend)=>{
   if(!friend.friendshipId) return
-
-  const {error}=await supabase
-   .from('friendships')
-   .delete()
-   .eq('id',friend.friendshipId)
-
-  if(error){
-   console.error('Unable to remove friend:',error)
-   note('Unable to remove friend.')
-   return
-  }
-
-  update({
-   ...data,
-   friends:data.friends.filter(
-    item=>item.friendshipId!==friend.friendshipId
-   )
-  })
-
+  if(!window.confirm(`Remove ${memberName(data,friend.memberId)} from your Rally friends?`)) return
+  const {error}=await supabase.from('friendships').delete().eq('id',friend.friendshipId)
+  if(error){console.error('Unable to remove friend:',error);note('Unable to remove friend.');return}
+  update({...data,friends:data.friends.filter(item=>item.friendshipId!==friend.friendshipId)})
   note('Friend removed.')
  }
 
  return <>
-  <section className="friends-hero">
+  <section className="page-heading simple-heading friends-page-heading">
    <div>
-    <p>👥 FRIENDS & COMMUNITY</p>
+    <p className="eyebrow">Friends</p>
     <h1>Your Rally circle</h1>
-    <span>Manage friends without exposing private Rally Space data.</span>
+    <p>Friends can cheer you on without seeing private Rally Space data.</p>
    </div>
   </section>
 
-  <section className="panel">
-   <div className="section-title">
-    <div>
-     <p className="eyebrow">Friends</p>
-     <h2>Connected</h2>
-    </div>
-    <button className="primary" onClick={addFriend}>
-     ＋ Add friend
-    </button>
+  <form className="panel add-friend-form" onSubmit={addFriend}>
+   <div><p className="eyebrow">Add a friend</p><h2>Find them by their Rally email</h2></div>
+   <div className="friend-email-row">
+    <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="friend@example.com" required/>
+    <button className="primary">Send request</button>
    </div>
+  </form>
 
-   {connected.map(friend=>{
-    const member=data.members.find(m=>m.id===friend.memberId)
-    if(!member) return null
-
-    return <div className="friend-settings-row" key={friend.memberId}>
-     <Avatar member={member}/>
-     <div>
-      <strong>{memberName(data,friend.memberId)}</strong>
-      <small>Connected friend</small>
-     </div>
-     <button className="secondary">View accomplishments</button>
-     <button className="danger" onClick={()=>remove(friend)}>
-      Remove
-     </button>
-    </div>
-   })}
-
-   {pending.length>0&&<>
-    <h3>Pending</h3>
+  {pending.length>0&&
+   <section className="panel">
+    <div className="section-title"><div><p className="eyebrow">Pending</p><h2>Requests</h2></div></div>
     {pending.map(friend=>{
      const member=data.members.find(m=>m.id===friend.memberId)
      if(!member) return null
      const incoming=friend.requesterId!==user.id
-
      return <div className="friend-settings-row" key={friend.friendshipId||friend.memberId}>
       <Avatar member={member}/>
-      <div>
-       <strong>{memberName(data,friend.memberId)}</strong>
-       <small>{incoming ? 'Wants to connect' : 'Friend request sent'}</small>
-      </div>
-
-      {incoming&&<>
-       <button className="primary" onClick={()=>accept(friend)}>
-        Accept
-       </button>
-       <button className="secondary" onClick={()=>decline(friend)}>
-        Decline
-       </button>
-      </>}
+      <div><strong>{member.name}</strong><small>{incoming?'Wants to connect':'Request sent'}</small></div>
+      {incoming&&<><button className="primary" onClick={()=>accept(friend)}>Accept</button><button className="secondary" onClick={()=>decline(friend)}>Decline</button></>}
      </div>
     })}
-   </>}
+   </section>
+  }
+
+  <section className="panel">
+   <div className="section-title"><div><p className="eyebrow">Connected</p><h2>{connected.length?`${connected.length} ${connected.length===1?'friend':'friends'}`:'No friends yet'}</h2></div></div>
+   {connected.length===0
+    ? <div className="empty friendly-empty">You don’t need friends to use Rally. Add people only when it makes the experience more fun.</div>
+    : connected.map(friend=>{
+       const member=data.members.find(m=>m.id===friend.memberId)
+       if(!member) return null
+       return <div className="friend-settings-row" key={friend.memberId}>
+        <Avatar member={member}/>
+        <div><strong>{member.name}</strong><small>{member.tier} · {member.globalLifetime.toLocaleString()} lifetime pts</small></div>
+        <button className="danger" onClick={()=>remove(friend)}>Remove</button>
+       </div>
+      })
+   }
   </section>
  </>
 }
@@ -3996,8 +5056,12 @@ function Notifications({data,user,update,setSpaceId,setScreen}:{data:AppData;use
  }
 
  return <>
-  <section className="panel">
-   <h1>Notifications</h1>
+  <section className="page-heading simple-heading notifications-heading">
+   <div><p className="eyebrow">Notifications</p><h1>Things worth noticing</h1><p>Actionable updates first. Everything else stays quiet.</p></div>
+  </section>
+
+  <section className="panel notification-feed">
+   {notes.length===0&&<div className="empty friendly-empty">You’re all caught up.</div>}
    {notes.map(n=>
     <button
      className={`notification ${n.read?'':'unread'}`}
@@ -4015,7 +5079,10 @@ function Notifications({data,user,update,setSpaceId,setScreen}:{data:AppData;use
    )}
   </section>
 
-  <NotificationSettings data={data} user={user} update={update}/>
+  <details className="panel notification-settings-shell">
+   <summary>Notification settings</summary>
+   <NotificationSettings data={data} user={user} update={update}/>
+  </details>
  </>
 }
 
@@ -4164,39 +5231,62 @@ function CreateSpace({
  }
 
  return <div className="modal-backdrop">
-  <form className="modal" onSubmit={submit}>
-   <button type="button" className="close" onClick={close}>×</button>
-   <p className="eyebrow">New Rally Space</p>
-   <h2>Create a Rally</h2>
+  <form className="modal create-space-modal" onSubmit={submit}>
+   <button type="button" className="close" onClick={close} aria-label="Close">×</button>
+   <p className="eyebrow">New Rally</p>
+   <h2>What are you rallying around?</h2>
+   <p className="modal-intro">Choose the kind of space that fits. You can keep it simple and change the details later.</p>
 
-   <label>
-    Name
-    <input name="name" required placeholder="Summer Fitness Crew"/>
-   </label>
+   <fieldset className="rally-type-fieldset">
+    <legend>Rally type</legend>
+    <div className="rally-type-grid">
+     <label className="rally-type-option">
+      <input type="radio" name="type" value="household" defaultChecked/>
+      <span>🏠</span>
+      <strong>Household</strong>
+      <small>Chores, routines, goals, and shared wins.</small>
+     </label>
+     <label className="rally-type-option">
+      <input type="radio" name="type" value="friends"/>
+      <span>👥</span>
+      <strong>Friends</strong>
+      <small>Challenges, motivation, and friendly competition.</small>
+     </label>
+     <label className="rally-type-option">
+      <input type="radio" name="type" value="work"/>
+      <span>💼</span>
+      <strong>Work</strong>
+      <small>Team habits, learning, and accountable progress.</small>
+     </label>
+     <label className="rally-type-option">
+      <input type="radio" name="type" value="personal"/>
+      <span>✨</span>
+      <strong>Just me</strong>
+      <small>A separate private Rally for a focused goal.</small>
+     </label>
+    </div>
+   </fieldset>
 
-   <div className="two">
+   <div className="two create-space-fields">
     <label>
-     Type
-     <select name="type">
-      <option value="personal">Personal</option>
-      <option value="household">Household</option>
-      <option value="work">Work</option>
-      <option value="friends">Friends</option>
-     </select>
+     Rally name
+     <input name="name" required placeholder="Williams-Hurt Home"/>
     </label>
-
     <label>
-     Icon
+     Icon <small>optional</small>
      <input name="icon" placeholder="🏠"/>
     </label>
    </div>
 
-   <label>
-    Timezone
-    <input name="timezone" defaultValue="America/New_York"/>
-   </label>
+   <details className="more-options create-space-more">
+    <summary>More options</summary>
+    <label>
+     Timezone
+     <input name="timezone" defaultValue="America/New_York"/>
+    </label>
+   </details>
 
-   <button className="primary">Create Rally</button>
+   <button className="primary create-rally-submit">Create Rally</button>
   </form>
  </div>
 }
