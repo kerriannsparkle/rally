@@ -259,7 +259,8 @@ const activityIds=(supabaseActivities||[]).map(
 
 let activityAssignments:any[]=[]
 let activityApprovers:any[]=[]
-
+let activityCompletions:any[]=[]
+let pointsLedger:any[]=[]
 if(activityIds.length>0){
 
  const {data:assignments,error:assignmentsError}=await supabase
@@ -285,7 +286,23 @@ if(activityIds.length>0){
  }
 
  activityApprovers=approvers || []
-}
+ const {data:completions,error:completionsError}=await supabase
+  .from('activity_completions')
+  .select(
+   'id, activity_id, space_id, completed_by, points, period_key, approval_status, approved_by, approved_at, completed_at'
+  )
+  .in('activity_id',activityIds)
+.order('completed_at',{ascending:false})
+
+ if(completionsError){
+  console.error(
+   'Unable to load activity completions:',
+   completionsError
+  )
+  return
+ }
+
+ activityCompletions=completions || []}
 // Convert Supabase activities into Rally's current Activity format
 const appActivities:Activity[]=(supabaseActivities||[]).map(activity=>{
 
@@ -296,7 +313,20 @@ const appActivities:Activity[]=(supabaseActivities||[]).map(activity=>{
  const approverIds=(activityApprovers||[])
   .filter(approver=>approver.activity_id===activity.id)
   .map(approver=>approver.user_id)
-
+const latestCompletion=activityCompletions.find(
+ completion=>completion.activity_id===activity.id
+)
+const completionStatus:ActivityStatus=
+ latestCompletion
+  ? latestCompletion.approval_status==='pending'
+   ? 'pending'
+   : latestCompletion.approval_status==='approved' ||
+     latestCompletion.approval_status==='not_required'
+    ? 'complete'
+    : 'open'
+  : (activity.status==='active'
+     ? 'open'
+     : activity.status) as ActivityStatus
  return {
   id:activity.id,
   spaceId:activity.space_id,
@@ -305,8 +335,16 @@ const appActivities:Activity[]=(supabaseActivities||[]).map(activity=>{
   category:activity.category || 'General',
   points:activity.points ?? 0,
   recurrence:activity.recurrence || 'One time',
-  status:(activity.status==='active' ? 'open' : activity.status) as ActivityStatus,
-  visibility:(activity.visibility || 'space') as Visibility,
+status:completionStatus,
+completedBy:
+ completionStatus!=='open'
+  ? latestCompletion?.completed_by
+  : undefined,
+
+completedAt:
+ completionStatus!=='open'
+  ? latestCompletion?.completed_at
+  : undefined,  visibility:(activity.visibility || 'space') as Visibility,
   assignedTo,
   completionMode:
    (activity.completion_mode || 'shared_once') as CompletionMode,
